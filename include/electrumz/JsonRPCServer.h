@@ -60,39 +60,6 @@ namespace electrumz {
 			unsigned char *buf = nullptr;
 			ssize_t offset = 0;
 			ssize_t len = 0;
-
-			std::map<std::string, int> CommandMap = {
-				{ "blockchain.block.header", ElectrumCommands::BCBlockHeader },
-				{ "blockchain.block.headers", ElectrumCommands::BCBlockHeaders },
-				{ "blockchain.estimatefee", ElectrumCommands::BCEstimatefee },
-				{ "blockchain.headers.subscribe", ElectrumCommands::BCHeadersSubscribe },
-				{ "blockchain.relayfee", ElectrumCommands::BCRelayfee },
-				{ "blockchain.scripthash.get_balance", ElectrumCommands::SHGetBalance },
-				{ "blockchain.scripthash.get_history", ElectrumCommands::SHGetHistory },
-				{ "blockchain.scripthash.get_mempool", ElectrumCommands::SHGetMempool },
-				{ "blockchain.scripthash.history", ElectrumCommands::SHHistory },
-				{ "blockchain.scripthash.listunspent", ElectrumCommands::SHListUnspent },
-				{ "blockchain.scripthash.subscribe", ElectrumCommands::SHSubscribe },
-				{ "blockchain.scripthash.utxos", ElectrumCommands::SHUTXOS },
-				{ "blockchain.transaction.broadcast", ElectrumCommands::TXBroadcast },
-				{ "blockchain.transaction.get", ElectrumCommands::TXGet },
-				{ "blockchain.transaction.get_merkle", ElectrumCommands::TXGetMerkle },
-				{ "blockchain.transaction.id_from_pos", ElectrumCommands::TXIdFromPos },
-				{ "mempool.changes", ElectrumCommands::MPChanges },
-				{ "mempool.get_fee_histogram", ElectrumCommands::MPGetFeeHistogram },
-				{ "server.add_peer", ElectrumCommands::SVAddPeer },
-				{ "server.banner", ElectrumCommands::SVBanner },
-				{ "server.donation_address", ElectrumCommands::SVDonationAddress },
-				{ "server.features", ElectrumCommands::SVFeatures },
-				{ "server.peers.subscribe", ElectrumCommands::SVPeersSubscribe },
-				{ "server.ping", ElectrumCommands::SVPing },
-				{ "server.version", ElectrumCommands::SVVersion },
-				{ "masternode.announce.broadcast", ElectrumCommands::MNAnnounceBroadcast },
-				{ "masternode.subscribe", ElectrumCommands::MNSubscribe },
-				{ "masternode.list", ElectrumCommands::MNList },
-				{ "protx.diff", ElectrumCommands::ProtxDiff },
-				{ "protx.info", ElectrumCommands::ProtxInfo }
-			};
 		};
 	}
 }

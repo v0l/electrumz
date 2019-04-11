@@ -8,6 +8,7 @@
 #include <assert.h>
 
 using namespace electrumz::net;
+using namespace electrumz::commands;
 
 //buffer size for reading client requests
 #ifndef JSONRPC_BUFF_LEN
@@ -235,8 +236,8 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 
 int JsonRPCServer::HandleCommand(nlohmann::json& cmd) {
 	auto method = cmd["method"].get<std::string>();
-	if (this->CommandMap.find(method) != this->CommandMap.end()) {
-		auto method_mapped = this->CommandMap.at(method);
+	if (CommandMap.find(method) != CommandMap.end()) {
+		auto method_mapped = CommandMap.at(method);
 		switch (method_mapped) {
 			case ElectrumCommands::BCBlockHeader: {
 				

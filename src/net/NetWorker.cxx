@@ -1,5 +1,5 @@
-#include <electrumz\JsonRPCServer.h>
 #include <electrumz\NetWorker.h>
+#include <electrumz\JsonRPCServer.h>
 
 #ifndef ELECTRUMZ_NO_SSL
 #include <mbedtls/debug.h>
