@@ -2,7 +2,8 @@
 #include <algorithm>
 
 #include <spdlog\spdlog.h>
-#include "net\NetWorker.h"
+
+#include <electrumz\NetWorker.h>
 
 using namespace electrumz;
 
@@ -10,10 +11,12 @@ int main(int argc, char* argv[]) {
 
 	spdlog::info("Starting electrumz..");
 
+	auto cfg = new util::Config("config.json");
+
 	//std::thread::hardware_concurrency()
 	std::vector<net::NetWorker*> v(1);
-	std::transform(v.begin(), v.end(), v.begin(), [](net::NetWorker *w) {
-		auto nw = new net::NetWorker("0.0.0.0");
+	std::transform(v.begin(), v.end(), v.begin(), [cfg](net::NetWorker *w) {
+		auto nw = new net::NetWorker(cfg);
 		nw->Init();
 		return nw;
 	});

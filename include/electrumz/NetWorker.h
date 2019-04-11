@@ -1,5 +1,7 @@
 #pragma once
 
+#include <electrumz\Config.h>
+
 #include <uv.h>
 #ifndef ELECTRUMZ_NO_SSL
 #include <mbedtls/ssl.h>
@@ -8,11 +10,13 @@
 #endif
 #include <thread>
 
+using namespace electrumz::util;
+
 namespace electrumz {
 	namespace net {
 		class NetWorker {
 		public:
-			NetWorker(const char* ip, unsigned short port = 5555);
+			NetWorker(Config*);
 			~NetWorker();
 			void Init();
 			void Join();

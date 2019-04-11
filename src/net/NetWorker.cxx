@@ -1,5 +1,5 @@
-#include "NetWorker.h"
-#include "JsonRPCServer.h"
+#include <electrumz\JsonRPCServer.h>
+#include <electrumz\NetWorker.h>
 
 #ifndef ELECTRUMZ_NO_SSL
 #include <mbedtls/debug.h>
@@ -8,8 +8,9 @@
 
 #include <spdlog/spdlog.h>
 using namespace electrumz::net;
+using namespace electrumz::util;
 
-NetWorker::NetWorker(const char* ip, unsigned short port) {
+NetWorker::NetWorker(Config *cfg) {
 	if (uv_loop_init(&this->loop)) {
 		throw new std::exception("UV init failed");
 	}
@@ -21,7 +22,7 @@ NetWorker::NetWorker(const char* ip, unsigned short port) {
 		throw new std::exception("UV TCP init failed");
 	}
 
-	if (uv_ip4_addr(ip, port, &this->addr)) {
+	if (uv_ip4_addr(cfg->host.c_str(), cfg->port, &this->addr)) {
 		throw new std::exception("Failed to parse ip");
 	}
 
@@ -100,18 +101,22 @@ void NetWorker::Init() {
 }
 
 void NetWorker::Work() {
-	if (uv_tcp_bind(&this->server, (const struct sockaddr*)&this->addr, 0)) {
+	int err = 0;
+	if (err = uv_tcp_bind(&this->server, (const struct sockaddr*)&this->addr, 0)) {
+		spdlog::error("Net worker failed to bind port: {}", uv_strerror(err));
 		throw new std::exception("Failed to bind port");
 	}
 					
-	if (uv_listen((uv_stream_t*)&this->server, 128, [](uv_stream_t* s, int status) {
+	if (err = uv_listen((uv_stream_t*)&this->server, 128, [](uv_stream_t* s, int status) {
 			auto nw = (NetWorker*)uv_loop_get_data(s->loop);
 			nw->OnConnect(s, status);
 	})) {
+		spdlog::error("Net worker failed to listen: {}", uv_strerror(err));
 		throw new std::exception("Failed to listen on port");
 	}
 
-	if (uv_run(&this->loop, UV_RUN_DEFAULT)) {
+	if (err = uv_run(&this->loop, UV_RUN_DEFAULT)) {
+		spdlog::error("Failed to start net worker thread: {}", uv_strerror(err));
 		throw new std::exception("UV run failed..");
 	}
 }

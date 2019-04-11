@@ -20,7 +20,18 @@ find_library(MBEDTLS_LIB "mbedtls")
 find_library(MBEDCRYPTO_LIB "mbedcrypto")
 find_library(MBEDX509_LIB "mbedx509")
 
-add_executable(electrumz src/electrumz.cxx src/net/NetWorker.cxx src/net/JsonRPCServer.cxx)
+set(SOURCES
+	src/electrumz.cxx 
+	src/net/NetWorker.cxx 
+	src/net/JsonRPCServer.cxx 
+	src/util/Config.cxx
+	src/electrum/Commands.cxx
+)
+
+add_executable(electrumz ${SOURCES})
+target_include_directories(electrumz BEFORE PRIVATE include)
+set_property(TARGET electrumz PROPERTY CXX_STANDARD 17)
+
 if(${USE_VCPKG})
     target_link_libraries(electrumz PRIVATE unofficial::libuv::libuv)
 else()

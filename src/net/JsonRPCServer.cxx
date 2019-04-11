@@ -1,9 +1,10 @@
-#include "JsonRPCServer.h"
+#include <electrumz\JsonRPCServer.h>
 
 #if defined(_DEBUG) && !defined(ELECTRUMZ_NO_SSL)
 #include <mbedtls\debug.h>
 #endif
 #include <spdlog\spdlog.h>
+#include <nlohmann\json.hpp>
 #include <assert.h>
 
 using namespace electrumz::net;
@@ -196,7 +197,7 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 #else
 	assert(this->state & JsonRPCState::NORMAL);
 	buf_check = (unsigned char*)buf->base;
-	buf_len = rlen;
+	buf_len = nread;
 #endif
 
 	//detect http request
@@ -212,7 +213,11 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 
 	char* nl = strchr((char*)buf_check, JSONRPC_DELIM);
 	if (nl != nullptr) {
+		nlohmann::json req;
+		req.parse(nlohmann::detail::input_adapter(nl, nl - (char*)buf_check));
 
+		spdlog::info("Got command: {}", req.dump());
+		this->HandleCommand(req);
 	}
 	else {
 		int ret = this->AppendBuffer(buf_len, buf_check);
@@ -226,6 +231,99 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 	free(buf_check);
 #endif
 	return 1;
+}
+
+int JsonRPCServer::HandleCommand(nlohmann::json& cmd) {
+	auto method = cmd["method"].get<std::string>();
+	if (this->CommandMap.find(method) != this->CommandMap.end()) {
+		auto method_mapped = this->CommandMap.at(method);
+		switch (method_mapped) {
+			case ElectrumCommands::BCBlockHeader: {
+				
+				break;
+			}
+			case ElectrumCommands::BCBlockHeaders: {
+				break;
+			}
+			case ElectrumCommands::BCEstimatefee: {
+				break;
+			}
+			case ElectrumCommands::BCHeadersSubscribe: {
+				break;
+			}
+			case ElectrumCommands::BCRelayfee: {
+				break;
+			}
+			case ElectrumCommands::SHGetBalance: {
+				break;
+			}
+			case ElectrumCommands::SHGetHistory: {
+				break;
+			}
+			case ElectrumCommands::SHGetMempool: {
+				break;
+			}
+			case ElectrumCommands::SHHistory: {
+				break;
+			}
+			case ElectrumCommands::SHListUnspent: {
+				break;
+			}
+			case ElectrumCommands::SHSubscribe: {
+				break;
+			}
+			case ElectrumCommands::SHUTXOS: {
+				break;
+			}
+			case ElectrumCommands::TXBroadcast: {
+				break;
+			}
+			case ElectrumCommands::TXGet: {
+				break;
+			}
+			case ElectrumCommands::TXGetMerkle: {
+				break;
+			}
+			case ElectrumCommands::TXIdFromPos: {
+				break;
+			}
+			case ElectrumCommands::MPChanges: {
+				break;
+			}
+			case ElectrumCommands::MPGetFeeHistogram: {
+				break;
+			}
+			case ElectrumCommands::SVAddPeer: {
+				break;
+			}
+			case ElectrumCommands::SVBanner: {
+				break;
+			}
+			case ElectrumCommands::SVDonationAddress: {
+				break;
+			}
+			case ElectrumCommands::SVFeatures: {
+				break;
+			}
+			case ElectrumCommands::SVPeersSubscribe: {
+				break;
+			}
+			case ElectrumCommands::SVPing: {
+				break;
+			}
+			case ElectrumCommands::SVVersion: {
+				break;
+			}
+			default: {
+				//not possible???
+				break;
+			}
+		}
+	}
+	else {
+		//need something to write responses
+	}
+	return 0;
 }
 
 void JsonRPCServer::End() {
