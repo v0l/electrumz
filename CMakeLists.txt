@@ -26,6 +26,17 @@ set(SOURCES
 	src/net/JsonRPCServer.cxx 
 	src/util/Config.cxx
 	src/electrum/Commands.cxx
+	src/blockchain/TXODB.cxx
+	
+	src/blockchain/bitcoin/block.cpp
+	src/blockchain/bitcoin/transaction.cpp
+	src/blockchain/bitcoin/script.cpp
+	src/blockchain/bitcoin/uint256.cpp
+	src/blockchain/bitcoin/strencodings.cpp
+	src/blockchain/bitcoin/cleanse.cpp
+	src/blockchain/bitcoin/key_io.cpp
+	src/blockchain/bitcoin/base58.cpp
+	src/blockchain/bitcoin/bech32.cpp
 )
 
 add_executable(electrumz ${SOURCES})

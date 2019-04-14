@@ -1,6 +1,7 @@
 #pragma once
 
 #include <electrumz\Config.h>
+#include <electrumz\TXODB.h>
 
 #include <uv.h>
 #ifndef ELECTRUMZ_NO_SSL
@@ -11,20 +12,25 @@
 #include <thread>
 
 using namespace electrumz::util;
+using namespace electrumz::blockchain;
 
 namespace electrumz {
 	namespace net {
 		class NetWorker {
 		public:
-			NetWorker(Config*);
+			NetWorker(TXODB*, Config*);
 			~NetWorker();
 			void Init();
 			void Join();
 
 		private:
 			void Work();
-			void OnConnect(uv_stream_t* s, int status);
+			void OnConnect(uv_stream_t *s, int status);
 
+			Config* cfg;
+			TXODB *db;
+
+			bool ssl_enabled;
 			std::thread worker_thread;
 			uv_loop_t loop;
 			uv_tcp_t server;

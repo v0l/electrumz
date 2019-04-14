@@ -52,7 +52,7 @@ void Config::from_json(std::ifstream &fi) {
 		this->ssl_cert = j["ssl_cert"].get<std::string>();
 	}
 	if (j["ssl_key"].is_string()) {
-		this->ssl_cert = j["ssl_key"].get<std::string>();
+		this->ssl_key = j["ssl_key"].get<std::string>();
 	}
 #endif
 }

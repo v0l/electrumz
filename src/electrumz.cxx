@@ -2,21 +2,26 @@
 #include <algorithm>
 
 #include <spdlog\spdlog.h>
-
 #include <electrumz\NetWorker.h>
+#include <electrumz\TXODB.h>
 
 using namespace electrumz;
+using namespace electrumz::blockchain;
 
 int main(int argc, char* argv[]) {
 
 	spdlog::info("Starting electrumz..");
 
 	auto cfg = new util::Config("config.json");
+	auto db = new TXODB("db");
+
+	spdlog::info("LMDB Version: {}", db->GetLMDBVersion());
+	db->PreLoadBlocks("P:\\bitcoin\\blocks");
 
 	//std::thread::hardware_concurrency()
 	std::vector<net::NetWorker*> v(1);
-	std::transform(v.begin(), v.end(), v.begin(), [cfg](net::NetWorker *w) {
-		auto nw = new net::NetWorker(cfg);
+	std::transform(v.begin(), v.end(), v.begin(), [db, cfg](net::NetWorker *w) {
+		auto nw = new net::NetWorker(db, cfg);
 		nw->Init();
 		return nw;
 	});

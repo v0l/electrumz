@@ -180,25 +180,27 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 	int buf_len = 0;
 	unsigned char* buf_check = NULL;
 #ifndef ELECTRUMZ_NO_SSL
-	assert(this->state & JsonRPCState::SSL_NORMAL);
-
-	buf_len = this->ssl_buf_len + (JSONRPC_BUFF_LEN - (this->ssl_buf_len % JSONRPC_BUFF_LEN));
-	buf_check = (unsigned char*)malloc(buf_len);
-	buf_len = mbedtls_ssl_read(this->ssl, buf_check, buf_len);
-	if (buf_len == 0 || (buf_len < 0 && (buf_len != MBEDTLS_ERR_SSL_WANT_READ && buf_len != MBEDTLS_ERR_SSL_WANT_WRITE))) {
-		free(buf_check);
-		return 0;//end something went wrong
+	if (this->state & JsonRPCState::SSL_NORMAL) {
+		buf_len = this->ssl_buf_len + (JSONRPC_BUFF_LEN - (this->ssl_buf_len % JSONRPC_BUFF_LEN));
+		buf_check = (unsigned char*)malloc(buf_len);
+		buf_len = mbedtls_ssl_read(this->ssl, buf_check, buf_len);
+		if (buf_len == 0 || (buf_len < 0 && (buf_len != MBEDTLS_ERR_SSL_WANT_READ && buf_len != MBEDTLS_ERR_SSL_WANT_WRITE))) {
+			free(buf_check);
+			return 0;//end something went wrong
+		}
+		else if (buf_len == MBEDTLS_ERR_SSL_WANT_READ) {
+			//just append to internal buffer and wait for more
+			int ret = this->AppendBuffer(buf_len, buf_check);
+			free(buf_check);
+			return ret;
+		}
 	}
-	else if (buf_len == MBEDTLS_ERR_SSL_WANT_READ) {
-		//just append to internal buffer and wait for more
-		int ret = this->AppendBuffer(buf_len, buf_check);
-		free(buf_check);
-		return ret;
+	else {
+#endif
+		buf_check = (unsigned char*)buf->base;
+		buf_len = nread;
+#ifndef ELECTRUMZ_NO_SSL
 	}
-#else
-	assert(this->state & JsonRPCState::NORMAL);
-	buf_check = (unsigned char*)buf->base;
-	buf_len = nread;
 #endif
 
 	//detect http request
@@ -207,9 +209,9 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 #ifndef ELECTRUMZ_NO_SSL
 		free(buf_check);
 #endif
-		static char* http_rsp = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/html\r\nContent-Length: 23\r\n\r\n<h2>ElectrumZ 1.0!</h2>";
+		static char* http_rsp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 23\r\n\r\n<h2>ElectrumZ 1.0!</h2>";
 		this->Write(strlen(http_rsp), (unsigned char*)http_rsp);
-		return 0; //http isnt supported
+		return 1; //nothing to do for http
 	}
 
 	char* nl = strchr((char*)buf_check, JSONRPC_DELIM);
@@ -328,6 +330,7 @@ int JsonRPCServer::HandleCommand(nlohmann::json& cmd) {
 }
 
 void JsonRPCServer::End() {
+	spdlog::info("end");
 	uv_read_stop((uv_stream_t*)this->stream);
 
 #ifndef ELECTRUMZ_NO_SSL
