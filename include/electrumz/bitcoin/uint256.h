@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+typedef unsigned char sha256[32];
+
 /** Template base class for fixed-sized opaque blobs. */
 template<unsigned int BITS>
 class base_blob
@@ -27,6 +29,7 @@ public:
     }
 
     explicit base_blob(const std::vector<unsigned char>& vch);
+	explicit base_blob(const sha256& v);
 
     bool IsNull() const
     {
@@ -121,7 +124,9 @@ public:
 class uint256 : public base_blob<256> {
 public:
     uint256() {}
+	uint256(sha256& v) : base_blob<256>(v) {}
     explicit uint256(const std::vector<unsigned char>& vch) : base_blob<256>(vch) {}
+	sha256* to_sha256() const { return (unsigned char(*)[32])this->data; }
 };
 
 /* uint256 from const char *.

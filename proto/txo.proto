@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+message txo_spend {
+    string txHash = 1;
+    uint32 txoIndex = 2;
+}
+
+message txo {
+    string scriptHash = 1;
+    string txHash = 2;
+    string blockHash = 3;
+    uint32 txoIndex = 4;
+    uint64 blockHeight = 5;
+    int64 value = 6;
+    txo_spend spend = 7;
+}
+
+message txos {
+    repeated txo txns = 1;
+}

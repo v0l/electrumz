@@ -20,6 +20,8 @@ find_library(MBEDTLS_LIB "mbedtls")
 find_library(MBEDCRYPTO_LIB "mbedcrypto")
 find_library(MBEDX509_LIB "mbedx509")
 
+add_subdirectory(proto)
+
 set(SOURCES
 	src/electrumz.cxx 
 	src/net/NetWorker.cxx 
@@ -28,15 +30,8 @@ set(SOURCES
 	src/electrum/Commands.cxx
 	src/blockchain/TXODB.cxx
 	
-	src/blockchain/bitcoin/block.cpp
-	src/blockchain/bitcoin/transaction.cpp
-	src/blockchain/bitcoin/script.cpp
-	src/blockchain/bitcoin/uint256.cpp
-	src/blockchain/bitcoin/strencodings.cpp
-	src/blockchain/bitcoin/cleanse.cpp
-	src/blockchain/bitcoin/key_io.cpp
-	src/blockchain/bitcoin/base58.cpp
-	src/blockchain/bitcoin/bech32.cpp
+	src/blockchain/btc/block.cxx
+	src/blockchain/btc/tx.cxx
 )
 
 add_executable(electrumz ${SOURCES})
@@ -53,3 +48,4 @@ target_link_libraries(electrumz PRIVATE spdlog::spdlog)
 target_link_libraries(electrumz PRIVATE ${MBEDTLS_LIB})
 target_link_libraries(electrumz PRIVATE ${MBEDCRYPTO_LIB})
 target_link_libraries(electrumz PRIVATE ${MBEDX509_LIB})
+target_link_libraries(electrumz PRIVATE proto)

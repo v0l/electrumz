@@ -16,7 +16,7 @@ int main(int argc, char* argv[]) {
 	auto db = new TXODB("db");
 
 	spdlog::info("LMDB Version: {}", db->GetLMDBVersion());
-	db->PreLoadBlocks("P:\\bitcoin\\blocks");
+	db->PreLoadBlocks("D:\\Bitcoin\\blocks");
 
 	//std::thread::hardware_concurrency()
 	std::vector<net::NetWorker*> v(1);
