@@ -15,6 +15,7 @@
 #include <iterator>
 #include <string>
 #include <vector>
+#include <memory>
 
 #define ARRAYLEN(array)     (sizeof(array)/sizeof((array)[0]))
 

@@ -1,11 +1,12 @@
-#include <electrumz\JsonRPCServer.h>
+#include <electrumz/JsonRPCServer.h>
 
 #if defined(_DEBUG) && !defined(ELECTRUMZ_NO_SSL)
-#include <mbedtls\debug.h>
+#include <mbedtls/debug.h>
 #endif
-#include <spdlog\spdlog.h>
-#include <nlohmann\json.hpp>
+#include <spdlog/spdlog.h>
+#include <nlohmann/json.hpp>
 #include <assert.h>
+#include <algorithm>
 
 using namespace electrumz::net;
 using namespace electrumz::commands;
@@ -382,7 +383,7 @@ void JsonRPCServer::InitTLSContext() {
 			return MBEDTLS_ERR_SSL_WANT_READ;
 		}
 
-		auto rlen = min(srv->ssl_buf_len - srv->ssl_buf_offset, len);
+		auto rlen = std::min(srv->ssl_buf_len - srv->ssl_buf_offset, (ssize_t)len);
 		memcpy(buf, srv->ssl_buf + srv->ssl_buf_offset, rlen);
 
 		if (rlen == srv->ssl_buf_len - srv->ssl_buf_offset) {

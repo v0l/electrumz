@@ -1,7 +1,7 @@
 #pragma once
 
-#include <electrumz\Config.h>
-#include <electrumz\TXODB.h>
+#include <electrumz/Config.h>
+#include <electrumz/TXODB.h>
 
 #include <uv.h>
 #ifndef ELECTRUMZ_NO_SSL

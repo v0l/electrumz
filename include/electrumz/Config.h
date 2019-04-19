@@ -1,7 +1,6 @@
 #pragma once
 
 #include <nlohmann/json.hpp>
-#include <iostream>
 
 namespace electrumz {
 	namespace util {

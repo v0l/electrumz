@@ -1,4 +1,4 @@
-#include <electrumz\Commands.h>
+#include <electrumz/Commands.h>
 
 using namespace electrumz::commands;
 

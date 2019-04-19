@@ -4,12 +4,12 @@
 #include <functional>
 #include <uv.h>
 
-#include <nlohmann\json.hpp>
+#include <nlohmann/json.hpp>
 #ifndef ELECTRUMZ_NO_SSL
-#include <mbedtls\ssl.h>
+#include <mbedtls/ssl.h>
 #endif
 
-#include <electrumz\Commands.h>
+#include <electrumz/Commands.h>
 
 namespace electrumz {
 	namespace net {
