@@ -14,8 +14,6 @@ struct arg_str *preload;
 struct arg_end *end;
 
 int main(int argc, char* argv[]) {
-	spdlog::info("Starting electrumz..");
-
 	void *argtable[] = {
         help    = arg_lit0("h", "help", "Display this help and exit"),
         version = arg_lit0(nullptr, "version", "Display version info and exit"),
@@ -32,8 +30,12 @@ int main(int argc, char* argv[]) {
 		return nerrors > 0 ? 1 : 0;
 	}
 
+	spdlog::info("Starting electrumz..");
 	auto cfg = new util::Config("config.json");
 	auto db = new TXODB("db");
+	if(db->Open()){
+		return 0;
+	}
 
 	spdlog::info("LMDB Version: {}", db->GetLMDBVersion());
 	if(preload->count > 0){

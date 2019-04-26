@@ -9,6 +9,9 @@
 #include <fstream>
 #include <stdio.h>
 #include <sstream>
+#include <queue>
+#include <atomic>
+#include <functional>
 
 using namespace electrumz;
 using namespace electrumz::blockchain;
@@ -17,21 +20,26 @@ constexpr auto MAPSIZE_BASE_UNIT = 1024 * 1024 * 1024;
 #define PRELOAD_BUFFER_SIZE 0x8000000 //load full blockfiles in RAM, this is called "MAX_BLOCKFILE_SIZE" in Bitcoin Core
 
 TXODB::TXODB(std::string path) {
-	std::filesystem::create_directories("db");
+	this->dbPath = path;
 
+	std::filesystem::create_directories(this->dbPath);
+}
+
+int TXODB::Open() {
 	int err = 0;
 	if (err = mdb_env_create(&this->env)) {
 		spdlog::error("mdb create failed {}", mdb_strerror(err));
-		return;
+		return err;
 	}
 	if (err = mdb_env_set_maxdbs(this->env, 2)) {
 		spdlog::error("Failed to set max dbs: {}", mdb_strerror(err));
-		return;
+		return err;
 	}
-	if (err = mdb_env_open(this->env, path.c_str(), MDB_NOTLS | MDB_CREATE | MDB_WRITEMAP, NULL)) {
+	if (err = mdb_env_open(this->env, this->dbPath.c_str(), MDB_NOTLS | MDB_CREATE | MDB_WRITEMAP, NULL)) {
 		spdlog::error("mdb open failed: {}", mdb_strerror(err));
-		return;
+		return err;
 	}
+	return err;
 }
 
 int TXODB::GetTXOs(uint256 scriptHash, std::vector<TXO> &ntx) {
@@ -187,95 +195,119 @@ int TXODB::InternalAddTXO(TXO&& nTx) {
 			mdb_txn_commit(txn);
 			return TXO_OK;
 		}
-		return err;
 	}
+	return err;
 }
 
 void TXODB::PreLoadBlocks(std::string path) {
 	spdlog::info("Preload starting.. this will take some time.");
-	CBlock blk;
 	
-	//enable no sync when preloading
 	mdb_env_set_flags(this->env, MDB_NOSYNC, 1);
+	
+	std::queue<std::filesystem::path> blks;
+	std::mutex blks_pop_lock;
 
-	//count how many blockfiles we have
-	uint32_t nBlockFilesDone = 0;
+	std::atomic<uint32_t> nBlockFilesDone = 0;
 	uint32_t nBlockFiles = 0;
 	for (auto &entry : std::filesystem::directory_iterator(path)) {
 		if (entry.path().filename().string().find("blk") == 0) {
-			nBlockFiles++;
+			blks.push(entry.path());
 		}
 	}
+	nBlockFiles = blks.size();
 
-	for (auto &entry : std::filesystem::directory_iterator(path)) {
-		auto fn = entry.path().filename().string();
-		if (fn.find("blk") == 0) {
-			spdlog::info("Loading block file {} ({}/{} {:.2f}%)", fn, nBlockFilesDone, nBlockFiles, 100.0 * ((float)nBlockFilesDone / (float)nBlockFiles));
+	std::vector<std::thread*> preload_threads(std::min(4u, std::thread::hardware_concurrency()));
+	spdlog::info("Using {} threads for preloading..", preload_threads.size());
 
-			auto bf_p = fopen(entry.path().string().c_str(), "rb");
-			CBufferedFile bf(bf_p, PRELOAD_BUFFER_SIZE, 0, SER_DISK, PROTOCOL_VERSION);
+	std::transform(preload_threads.begin(), preload_threads.end(), preload_threads.begin(), [&blks, &blks_pop_lock, &nBlockFilesDone, nBlockFiles, this](std::thread*) {
+		return new std::thread([&blks, &blks_pop_lock, &nBlockFilesDone, nBlockFiles, this] {
+			std::filesystem::path blk_path;
+			CBlock blk;
+			while(1) {
+				{
+					std::lock_guard<std::mutex> pop_lock(blks_pop_lock);
+					mdb_env_sync(this->env, 0);
 
-			char net_magic[4];
-			uint32_t len, offset;
+					if(blks.size() == 0){
+						break; // nothing in queue, stop thread
+					}
+					blk_path = blks.front();
+					blks.pop();
+				}
 
-			while (1) {
-				memset(net_magic, 0, 4);
-				len = 0;
-				offset = 0;
-				blk.SetNull();
+				//read block file
+				auto fn = blk_path.filename().string();
+				spdlog::info("Loading block file {} ({}/{} {:.2f}%)", fn, nBlockFilesDone, nBlockFiles, 100.0 * ((float)nBlockFilesDone / (float)nBlockFiles));
 
-				if (!feof(bf_p)) {
-					try {
-						bf >> net_magic;
-						bf >> len;
+				auto bf_p = fopen(blk_path.string().c_str(), "rb");
+				CBufferedFile bf(bf_p, PRELOAD_BUFFER_SIZE, 0, SER_DISK, PROTOCOL_VERSION);
 
-						if (!(net_magic[0] == '\xf9' && net_magic[1] == '\xbe' && net_magic[2] == '\xb4' && net_magic[3] == '\xd9')) {
-							spdlog::warn("Invalid blockchain");
-							continue;
-						}
+				char net_magic[4];
+				uint32_t len, offset;
 
-						if (len > 0) {
-							Unserialize(bf, blk);
-							
-							uint256 blkHash = blk.GetHash();
-							for (auto tx : blk.vtx) {
-								uint256 txHash = tx->GetHash();
-								int txop = 0;
+				while (1) {
+					memset(net_magic, 0, 4);
+					len = 0;
+					offset = 0;
+					blk.SetNull();
 
-								for (auto ntxo : tx->vout) {
-									uint256 sh = SHash(ntxo.scriptPubKey.begin(), ntxo.scriptPubKey.end());
+					if (!feof(bf_p)) {
+						try {
+							bf >> net_magic;
+							bf >> len;
 
-									TXO t;
-									t.scriptHash = sh;
-									t.txHash = txHash;
-									t.n = txop;
-									t.value = ntxo.nValue;
+							if (!(net_magic[0] == '\xf9' && net_magic[1] == '\xbe' && net_magic[2] == '\xb4' && net_magic[3] == '\xd9')) {
+								spdlog::warn("Invalid blockchain");
+								continue;
+							}
 
-									if (this->InternalAddTXO(std::move(t)) == TXO_RESIZED) {
-										this->InternalAddTXO(std::move(t)); //if resized try again
+							if (len > 0) {
+								Unserialize(bf, blk);
+								
+								uint256 blkHash = blk.GetHash();
+								for (auto tx : blk.vtx) {
+									uint256 txHash = tx->GetHash();
+									int txop = 0;
+
+									for (auto ntxo : tx->vout) {
+										uint256 sh = SHash(ntxo.scriptPubKey.begin(), ntxo.scriptPubKey.end());
+
+										TXO t;
+										t.scriptHash = sh;
+										t.txHash = txHash;
+										t.n = txop;
+										t.value = ntxo.nValue;
+
+										if (this->InternalAddTXO(std::move(t)) == TXO_RESIZED) {
+											this->InternalAddTXO(std::move(t)); //if resized try again
+										}
+
+										txop++;
 									}
-
-									txop++;
 								}
 							}
+							else {
+								spdlog::warn("Invalid len {}", len);
+							}
 						}
-						else {
-							spdlog::warn("Invalid len {}", len);
+						catch (std::ios_base::failure ex) {
+							spdlog::error("{}", ex.what());
 						}
 					}
-					catch (std::ios_base::failure ex) {
-						spdlog::error("{}", ex.what());
+					else {
+						break;
 					}
 				}
-				else {
-					break;
-				}
-			}
 
-			bf.fclose();
-			nBlockFilesDone++;
-			mdb_env_sync(this->env, 0);
-		}
+				bf.fclose();
+				nBlockFilesDone++;
+			}
+		});
+	});
+
+	for(auto t : preload_threads) {
+		t->join();
 	}
+
 	spdlog::info("Preload finished!");
 }

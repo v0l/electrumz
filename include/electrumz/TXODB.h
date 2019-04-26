@@ -20,12 +20,14 @@ namespace electrumz {
 		class TXODB {
 		public:
 			TXODB(std::string);
+			int Open();
 			char* GetLMDBVersion() { return mdb_version(NULL, NULL, NULL); }
 			void PreLoadBlocks(std::string);
 			
 			int GetTXOs(uint256, std::vector<TXO>&);
 			int WriteTXOs(uint256, std::vector<TXO>&);
 		private:
+			std::string dbPath;
 			MDB_env *env;
 			MDB_dbi *txo_dbi;
 			std::mutex txdbMutex;
