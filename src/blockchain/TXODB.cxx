@@ -17,7 +17,7 @@
 using namespace electrumz;
 using namespace electrumz::blockchain;
 
-constexpr auto MAPSIZE_BASE_UNIT = 1024 * 1024 * 1024;
+constexpr mdb_size_t MAPSIZE_BASE_UNIT = 1024 * 1024 * 1024;
 #define PRELOAD_BUFFER_SIZE 0x8000000 //load full blockfiles in RAM, this is called "MAX_BLOCKFILE_SIZE" in Bitcoin Core
 
 TXODB::TXODB(std::string path) {
@@ -35,9 +35,24 @@ int TXODB::Open() {
 		spdlog::error("Failed to set max dbs: {}", mdb_strerror(err));
 		return err;
 	}
-	if (err = mdb_env_open(this->env, this->dbPath.c_str(), MDB_CREATE | MDB_WRITEMAP, 0644)) {
+	if (err = mdb_env_open(this->env, this->dbPath.c_str(), MDB_CREATE | MDB_WRITEMAP | MDB_MAPASYNC, 0644)) {
 		spdlog::error("mdb open failed: {}", mdb_strerror(err));
 		return err;
+	}
+
+	struct MDB_envinfo current_info;
+	if (err = mdb_env_info(this->env, &current_info)) {
+		spdlog::error("Failed to get env info for resize: {}", mdb_strerror(err));
+		return err;
+	}
+
+	if (current_info.me_mapsize < MAPSIZE_BASE_UNIT) {
+		mdb_size_t new_size = MAPSIZE_BASE_UNIT * 50;
+		spdlog::info("Setting mapsize to {}", new_size);
+		if (err = mdb_env_set_mapsize(this->env, new_size)) {
+			spdlog::error("Failed to resize map: {}", mdb_strerror(err));
+			return err;
+		}
 	}
 	return err;
 }
@@ -91,6 +106,7 @@ int TXODB::WriteTXOs(uint256 scriptHash, std::vector<TXO> &txns) {
 	};
 	
 	CDataStream ds(SER_DISK, PROTOCOL_VERSION);
+	ds.reserve(txns.size() * TXO::ApproxSize);
 	ds << txns;
 
 	MDB_val val = {
@@ -120,7 +136,7 @@ int TXODB::IncreaseMapSize() {
 		return err;
 	}
 
-	size_t new_size = (current_info.me_mapsize - (current_info.me_mapsize % MAPSIZE_BASE_UNIT)) + MAPSIZE_BASE_UNIT;
+	mdb_size_t new_size = (current_info.me_mapsize - (current_info.me_mapsize % MAPSIZE_BASE_UNIT)) + MAPSIZE_BASE_UNIT;
 	spdlog::info("Setting mapsize to {}", new_size);
 	if (err = mdb_env_set_mapsize(this->env, new_size)) {
 		spdlog::error("Failed to resize map: {}", mdb_strerror(err));
@@ -146,11 +162,11 @@ int TXODB::StartTXOTxn(MDB_txn **txn, const char* dbn, MDB_dbi& dbi) {
 }
 
 int TXODB::InputToAddr(COutPoint& output, uint256& scriptHash) {
-
+	return TXO_OK;
 }
 
 int TXODB::InternalSpendTXO(COutPoint& prevout, COutPoint& spendingTx) {
-	std::scoped_lock txo_lock(this->txdbMutex, this->i2aMutex);
+	//std::scoped_lock txo_lock(this->txdbMutex, this->i2aMutex);
 	int err = 0;
 	MDB_txn *txn;
 	MDB_dbi dbi;
@@ -248,73 +264,55 @@ int TXODB::InternalAddTXO(TXO& nTx, MDB_txn* txn, MDB_dbi& dbi, MDB_dbi& dbi_i2a
 		nTx.scriptHash.begin()
 	};
 
-	MDB_val val;
-	err = mdb_get(txn, dbi, &key, &val);
-	if (err != 0 && err != MDB_NOTFOUND) {
-		spdlog::error("Error getting txos {}", mdb_strerror(err));
+	CDataStream ds(SER_DISK, PROTOCOL_VERSION);
+	ds << nTx;
+		
+	MDB_val val_write = {
+		ds.size(),
+		ds.data()
+	};
+
+	err = mdb_put(txn, dbi, &key, &val_write, NULL);
+	if (err != 0) {
+		spdlog::error("AddTXOs write failed {}", mdb_strerror(err));
+		if(err == MDB_MAP_FULL) {
+			mdb_txn_abort(txn);
+			err = this->IncreaseMapSize();
+		} 
 		return err;
 	}
-	else {
-		CDataStream ds(SER_DISK, PROTOCOL_VERSION);
-		std::vector<TXO> vtx;
-		//if data was found, load it first
-		if (err == 0) {
-			ds.write((char*)val.mv_data, val.mv_size);
-			ds >> vtx;
-		}
-		vtx.push_back(nTx);
-		ds.clear();
-
-		ds << vtx;
 		
-		MDB_val val_write = {
-			ds.size(),
-			ds.data()
-		};
+	//track new outputs to their address
+	//COutPoint -> ScriptHash
+	ds.clear();
+	COutPoint nout;
+	nout.hash = nTx.txHash;
+	nout.n = nTx.n;
 
-		err = mdb_put(txn, dbi, &key, &val_write, NULL);
-		if (err != 0) {
-			spdlog::error("AddTXOs write failed {}", mdb_strerror(err));
-			if(err == MDB_MAP_FULL) {
-				mdb_txn_abort(txn);
-				err = this->IncreaseMapSize();
-			} 
-			return err;
-		}
-		
-		//track new outputs to their address
-		//COutPoint -> ScriptHash
-		ds.clear();
-		COutPoint nout;
-		nout.hash = nTx.txHash;
-		nout.n = nTx.n;
+	ds << nout;
+	MDB_val key_i2a = {
+		ds.size(),
+		ds.data()
+	};
 
-		ds << nout;
-		MDB_val key_i2a = {
-			ds.size(),
-			ds.data()
-		};
-
-		err = mdb_put(txn, dbi_i2a, &key_i2a, &key, NULL);
-		if (err != 0) {
-			spdlog::error("AddTXOs(i2a) write failed {}", mdb_strerror(err));
-			if(err == MDB_MAP_FULL) {
-				mdb_txn_abort(txn);
-				err = this->IncreaseMapSize();
-			} 
-			return err;
-		}
-
-		return TXO_OK;
+	err = mdb_put(txn, dbi_i2a, &key_i2a, &key, NULL);
+	if (err != 0) {
+		spdlog::error("AddTXOs(i2a) write failed {}", mdb_strerror(err));
+		if(err == MDB_MAP_FULL) {
+			mdb_txn_abort(txn);
+			err = this->IncreaseMapSize();
+		} 
+		return err;
 	}
-	return err;
+
+	return TXO_OK;
 }
 
 
 void TXODB::PreLoadBlocks(std::string path) {
 	spdlog::info("Preload starting.. this will take some time.");
 	
-	//mdb_env_set_flags(this->env, MDB_NOSYNC, 1);
+	mdb_env_set_flags(this->env, MDB_NOSYNC, 1);
 
 	std::vector<std::filesystem::path> blks;
 	std::mutex blks_pop_lock;
@@ -325,15 +323,13 @@ void TXODB::PreLoadBlocks(std::string path) {
 		if (entry.path().filename().string().find("blk") == 0) {
 			blks.push_back(entry.path());
 			nBlockFiles++;
-			if(nBlockFiles > 0){
-				break;
-			}
 		}
 	}
 
 	auto pos_txo = blks.begin();
 	auto pos_txo_end = blks.end();
-	std::vector<std::thread*> preload_threads(std::min(1u, std::thread::hardware_concurrency()));
+	//std::vector<std::thread*> preload_threads(std::min(4u, std::thread::hardware_concurrency()));
+	std::vector<std::thread*> preload_threads(std::thread::hardware_concurrency());
 	spdlog::info("Using {} threads for preloading..", preload_threads.size());
 	
 	int mode = 0;
@@ -362,8 +358,9 @@ void TXODB::PreLoadBlocks(std::string path) {
 			CBufferedFile bf(bf_p, PRELOAD_BUFFER_SIZE, 0, SER_DISK, PROTOCOL_VERSION);
 
 			char net_magic[4];
-			uint32_t len, offset;
-			uint32_t nBlocks;
+			uint32_t len = 0, offset = 0;
+			uint32_t nBlocks = 0;
+			uint32_t nTxo = 0;
 			
 			auto start = std::chrono::system_clock::now();
 			while (1) {
@@ -397,7 +394,7 @@ void TXODB::PreLoadBlocks(std::string path) {
 								return err;
 							}
 
-							if (err = mdb_dbi_open(txn, TXO_DBI, MDB_CREATE, &dbi)) {
+							if (err = mdb_dbi_open(txn, TXO_DBI, MDB_CREATE | MDB_DUPSORT, &dbi)) {
 								spdlog::error("Failed to open dbi {}: {}", TXO_DBI, mdb_strerror(err));
 								err == MDB_MAP_FULL && (err = this->IncreaseMapSize());
 								return err;
@@ -445,11 +442,11 @@ void TXODB::PreLoadBlocks(std::string path) {
 											if(err != TXO_RESIZED){ //in this case the tx is already aborted
 												mdb_txn_abort(txn);
 											}
-											spdlog::info("GOTO RETRY");
 											goto try_block_again;
 										}
 
 										txop++;
+										nTxo++;
 									}
 								}
 							}
@@ -460,8 +457,9 @@ void TXODB::PreLoadBlocks(std::string path) {
 							std::chrono::duration<double> nt = std::chrono::system_clock::now() - start;
 							if(nt.count() >= 5){
 								start = std::chrono::system_clock::now();
-								spdlog::info("{} blocks in {:.2f}s - {:.2f} blk/s", nBlocks, nt.count(), nBlocks / nt.count());
+								spdlog::info("{} blocks in {:.2f}s - {:.2f} blk/s ({:.2f} txo/s)", nBlocks, nt.count(), nBlocks / nt.count(), nTxo / nt.count());
 								nBlocks = 0;
+								nTxo = 0;
 							}
 						}
 						else {
@@ -478,6 +476,7 @@ void TXODB::PreLoadBlocks(std::string path) {
 			}
 
 			bf.fclose();
+			mdb_env_sync(this->env, 1);
 		}
 	};
 
