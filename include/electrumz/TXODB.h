@@ -14,7 +14,8 @@ namespace electrumz {
 			TXO_ERR,
 			TXO_OK,
 			TXO_NOTFOUND,
-			TXO_RESIZED
+			TXO_RESIZED,
+			TXO_MAP_FULL
 		};
 
 		class TXODB {
@@ -26,14 +27,30 @@ namespace electrumz {
 			
 			int GetTXOs(uint256, std::vector<TXO>&);
 			int WriteTXOs(uint256, std::vector<TXO>&);
+
+			/**
+			 * Maps an intput to a scriptHash.
+			*/
+			int InputToAddr(COutPoint&, uint256&);
 		private:
+			static constexpr char* TXO_DBI = "txo";
+			static constexpr char* I2A_DBI = "i2a";
+
 			std::string dbPath;
 			MDB_env *env;
-			MDB_dbi *txo_dbi;
 			std::mutex txdbMutex;
+			std::mutex i2aMutex;
 
-			int InternalAddTXO(TXO&&);
-			int StartTXOTxn(MDB_txn**, MDB_dbi&);
+			/**
+			 * Appends a TXO to a scriptHash.
+			*/
+			int InternalAddTXO(TXO&, MDB_txn*, MDB_dbi&, MDB_dbi&);
+			
+			/**
+			 * Marks an output as spent by txin.prevout
+			*/
+			int InternalSpendTXO(COutPoint&, COutPoint&);
+			int StartTXOTxn(MDB_txn**, const char*, MDB_dbi&);
 			int IncreaseMapSize();
 		};
 
