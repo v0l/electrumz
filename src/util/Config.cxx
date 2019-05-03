@@ -47,6 +47,21 @@ void Config::from_json(std::ifstream &fi) {
 	if (j["port"].is_number()) {
 		this->port = j["port"].get<unsigned short>();
 	}
+	if (j["rpc_host"].is_string()) {
+		this->rpchost = j["rpc_host"].get<std::string>();
+	}
+	if (j["rpc_username"].is_string()) {
+		this->rpcusername = j["rpc_username"].get<std::string>();
+	}
+	if (j["rpc_password"].is_string()) {
+		this->rpcpassword = j["rpc_password"].get<std::string>();
+	}
+	if (j["zmqrawtx"].is_string()) {
+		this->zmqrawtx = j["zmqrawtx"].get<std::string>();
+	}
+	if (j["zmqrawblock"].is_string()) {
+		this->zmqrawblock = j["zmqrawblock"].get<std::string>();
+	}
 #ifndef ELECTRUMZ_NO_SSL
 	if (j["ssl_cert"].is_string()) {
 		this->ssl_cert = j["ssl_cert"].get<std::string>();

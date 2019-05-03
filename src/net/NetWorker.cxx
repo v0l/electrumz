@@ -80,7 +80,7 @@ NetWorker::NetWorker(TXODB *db, Config *cfg) {
 		mbedtls_ssl_conf_own_cert(this->ssl_config, this->ssl_cert, this->ssl_key);
 
 #ifdef _DEBUG
-		mbedtls_debug_set_threshold(1);
+		mbedtls_debug_set_threshold(4);
 		mbedtls_ssl_conf_dbg(this->ssl_config, [](void *ctx, int level, const char *file, int line, const char *str) {
 			const_cast<char*>(str)[strlen(str) - 1] = 0; // remove newline
 
@@ -102,6 +102,7 @@ NetWorker::NetWorker(TXODB *db, Config *cfg) {
 	}
 	else {
 		spdlog::warn("SSL support is enabled, but no cert/key was specified..");
+		this->ssl_config = nullptr;
 	}
 #endif
 }
@@ -146,7 +147,7 @@ void NetWorker::OnConnect(uv_stream_t* server, int status) {
 	if (uv_accept(server, (uv_stream_t*)client) == 0) {
 		spdlog::info("New connection!");
 #ifndef ELECTRUMZ_NO_SSL
-		new JsonRPCServer(client, this->ssl_config);
+		new JsonRPCServer(client, this->cfg, this->ssl_config);
 #else
 		new JsonRPCServer(client);
 #endif
@@ -155,4 +156,10 @@ void NetWorker::OnConnect(uv_stream_t* server, int status) {
 
 void NetWorker::Join() {
 	this->worker_thread.join();
+}
+
+RPCClient NetWorker::CreateRPCClient(std::string addr, std::string uname, std::string pw) {
+	RPCClient ret(addr, uname, pw);
+	ret.Connect(&this->loop);
+	return ret;
 }

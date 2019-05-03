@@ -13,33 +13,29 @@ namespace electrumz {
 		}
 
 		//scriptHash, txHash, txIndex, value
-		TXO(uint256 sHash, uint256 txHash, uint32_t tIndex, CAmount v)
-			: scriptHash(sHash), txHash(txHash), n(tIndex), value(v) {
-			blockHeight = 0;
-		}
-
-		TXO(uint256 sHash, uint256 txHash, uint32_t tIndex, CAmount v, unsigned int h)
-			: scriptHash(sHash), txHash(txHash), n(tIndex), value(v), blockHeight(h) {
+		TXO(uint256 sHash, uint256 txHash, uint32_t tIndex, CAmount v, uint64_t blockHeight)
+			: scriptHash(sHash), txHash(txHash), n(tIndex), value(v), blockHeight(blockHeight) {
 		}
 
 		ADD_SERIALIZE_METHODS;
 
 		template <typename Stream, typename Operation>
 		inline void SerializationOp(Stream& s, Operation ser_action) {
-			READWRITE(txHash);
 			READWRITE(n);
-			READWRITE(blockHeight);
 			READWRITE(value);
-			READWRITE(spendingTxi);
+			READWRITE(blockHeight);
+			READWRITE(spend);
 		}
-
-		uint256 scriptHash;
+		
+		//in memory only
 		uint256 txHash;
-		uint32_t n;
-		uint64_t blockHeight;
-		CAmount value;
-		COutPoint spendingTxi;
+		uint256 scriptHash;
 
-		static const uint32_t ApproxSize = 147;
+		uint32_t n;
+		CAmount value;
+		uint64_t blockHeight;
+		COutPoint spend;
+
+		static const uint32_t ApproxSize = sizeof(n) + sizeof(value) + sizeof(blockHeight) + sizeof(spend);
 	};
 }

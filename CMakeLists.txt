@@ -20,10 +20,12 @@ if(UNIX)
 	find_library(L_PTHREAD pthread)
 	find_library(L_LIBUV uv)
 	find_library(L_LMDB lmdb)
+	find_library(L_ZMQ zmq)
 else()
 	find_package(unofficial-libuv CONFIG REQUIRED)
 	find_package(lmdb CONFIG REQUIRED)
 	find_package(spdlog CONFIG REQUIRED)
+	find_package(ZeroMQ CONFIG REQUIRED)
 endif()
 find_library(L_MBEDTLS mbedtls)
 find_library(L_MBEDTLS_CRYPTO mbedcrypto)
@@ -37,6 +39,7 @@ set(SOURCES
 	src/util/Config.cxx
 	src/electrum/Commands.cxx
 	src/blockchain/TXODB.cxx
+	src/net/RPCClient.cxx
 	
 	src/blockchain/bitcoin/strencodings.cpp
 	src/blockchain/bitcoin/transaction.cpp
@@ -55,6 +58,7 @@ target_include_directories(electrumz BEFORE PRIVATE include)
 if(UNIX)
 	target_link_libraries(electrumz PRIVATE ${L_LMDB})
 	target_link_libraries(electrumz PRIVATE ${L_LIBUV})
+	target_link_libraries(electrumz PRIVATE ${L_ZMQ})
 	target_link_libraries(electrumz PRIVATE ${L_MBEDTLS})
 	target_link_libraries(electrumz PRIVATE ${L_MBEDTLS_CRYPTO})
 	target_link_libraries(electrumz PRIVATE ${L_MBEDTLS_X509})
@@ -69,6 +73,7 @@ else()
 	target_link_libraries(electrumz PRIVATE lmdb)
 	target_link_libraries(electrumz PRIVATE unofficial::libuv::libuv)
 	target_link_libraries(electrumz PRIVATE spdlog::spdlog)
+	target_link_libraries(electrumz PRIVATE libzmq libzmq-static)
 	target_link_libraries(electrumz PRIVATE ${L_MBEDTLS})
 	target_link_libraries(electrumz PRIVATE ${L_MBEDTLS_CRYPTO})
 	target_link_libraries(electrumz PRIVATE ${L_MBEDTLS_X509})

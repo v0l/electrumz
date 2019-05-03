@@ -27,14 +27,22 @@ using namespace electrumz::commands;
 #endif
 
 #ifndef ELECTRUMZ_NO_SSL
-JsonRPCServer::JsonRPCServer(uv_tcp_t *s, mbedtls_ssl_config* ssl_cfg) {
-	this->ssl_config = ssl_cfg;
+JsonRPCServer::JsonRPCServer(uv_tcp_t *s, const Config* cfg, mbedtls_ssl_config* ssl_cfg) 
+	: stream(s), config(cfg), ssl_config(ssl_cfg), ssl(nullptr) {
 #else
-JsonRPCServer::JsonRPCServer(uv_tcp_t *s) {
+JsonRPCServer::JsonRPCServer(uv_tcp_t *s, const Config* cfg) : stream(s), config(cfg) {
 #endif
-	this->stream = s;
 	this->state = JsonRPCState::START;
 	
+	//create rpc client
+	//later this will need to be shared or pooled
+	// 1:1 rpc connections is not good..
+	auto loop = uv_handle_get_loop((uv_handle_t*)s);
+	auto nrpc = new RPCClient(cfg->rpchost, cfg->rpcusername, cfg->rpcpassword);
+	nrpc->Connect(loop);
+
+	this->rpc = nrpc;
+
 	//ref this class to track req/reply
 	uv_handle_set_data((uv_handle_t*)s, this);
 
@@ -65,7 +73,7 @@ int JsonRPCServer::TryHandshake() {
 		//free this if it wasnt all used
 		this->ssl_buf_offset = 0;
 		this->ssl_buf_len = 0;
-		this->ssl_buf = NULL;
+		this->ssl_buf = nullptr;
 		return 0; //something bad happen
 	}
 }
@@ -152,6 +160,11 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 		this->state ^= JsonRPCState::START;
 		if (this->IsTLSClientHello(nread, buf->base)) {
 #ifndef ELECTRUMZ_NO_SSL
+			//ssl is not enabled
+			if (this->ssl_config == nullptr) {
+				spdlog::warn("Client tried to open SSL connection on non-SSL enabled port..");
+				return 0;
+			}
 			//we are not in SSL mode yet so set this here
 			assert(this->ssl_buf == nullptr);
 			this->ssl_buf = buf->base;
@@ -178,8 +191,9 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 	}
 #endif
 
+	bool shouldFree = false;
 	int buf_len = 0;
-	unsigned char* buf_check = NULL;
+	unsigned char* buf_check = nullptr;
 #ifndef ELECTRUMZ_NO_SSL
 	if (this->state & JsonRPCState::SSL_NORMAL) {
 		buf_len = this->ssl_buf_len + (JSONRPC_BUFF_LEN - (this->ssl_buf_len % JSONRPC_BUFF_LEN));
@@ -195,6 +209,7 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 			free(buf_check);
 			return ret;
 		}
+		shouldFree = true;
 	}
 	else {
 #endif
@@ -208,7 +223,9 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 	char* http = strstr((char*)buf_check, "GET");
 	if ((unsigned char*)http == buf_check) {
 #ifndef ELECTRUMZ_NO_SSL
-		free(buf_check);
+		if (shouldFree) {
+			free(buf_check);
+		}
 #endif
 		static char* http_rsp = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 23\r\n\r\n<h2>ElectrumZ 1.0!</h2>";
 		this->Write(strlen(http_rsp), (unsigned char*)http_rsp);
@@ -217,36 +234,130 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 
 	char* nl = strchr((char*)buf_check, JSONRPC_DELIM);
 	if (nl != nullptr) {
-		nlohmann::json req;
-		req.parse(nlohmann::detail::input_adapter(nl, nl - (char*)buf_check));
-
+		nlohmann::json req = nlohmann::json::parse(nlohmann::detail::input_adapter(buf_check, nl - (char*)buf_check));
+		
 		spdlog::info("Got command: {}", req.dump());
 		this->HandleCommand(req);
 	}
 	else {
 		int ret = this->AppendBuffer(buf_len, buf_check);
 #ifndef ELECTRUMZ_NO_SSL
-		free(buf_check);
+		if (shouldFree) {
+			free(buf_check);
+		}
 #endif
 		return ret;
 	}
 
 #ifndef ELECTRUMZ_NO_SSL
-	free(buf_check);
+	if (shouldFree) {
+		free(buf_check);
+	}
 #endif
 	return 1;
 }
 
+template<class T>
+int JsonRPCServer::CommandSuccess(int id, const T& cmd, nlohmann::json& j) {
+	j.clear();
+	j["id"] = id;
+	j["jsonrpc"] = "2.0";
+	
+	nlohmann::json result;
+	to_json(result, cmd);
+	j["result"] = result;
+
+	return 1;
+}
+
+int JsonRPCServer::CommandError(int id, std::string msg, int err, nlohmann::json& j) {
+	j.clear();
+	j["id"] = id;
+	j["jsonrpc"] = "2.0";
+
+	nlohmann::json error;
+	error["message"] = msg;
+	error["code"] = err;
+
+	j["error"] = error;
+
+	return 1;
+}
+
+int JsonRPCServer::WriteInternal(nlohmann::json&& data) {
+	auto d = data.dump(-1, ' ', true);
+	spdlog::info("Writing response: {}", d);
+	d.resize(d.size() + 1, '\n');
+
+	return WriteInternal(d.size(), (unsigned char*)d.data());
+}
+
 int JsonRPCServer::HandleCommand(nlohmann::json& cmd) {
+	if (cmd.is_null()) {
+		nlohmann::json jrsp;
+		CommandError(0, "Parser error", -32700, jrsp);
+		WriteInternal(std::move(jrsp));
+		return 0;
+	}
 	auto method = cmd["method"].get<std::string>();
+	auto id = cmd["id"].get<int>();
 	if (CommandMap.find(method) != CommandMap.end()) {
 		auto method_mapped = CommandMap.at(method);
+		
 		switch (method_mapped) {
 			case ElectrumCommands::BCBlockHeader: {
-				
+				uint64_t height;
+				uint64_t cp_height = 0;
+
+				nlohmann::json jrsp;
+				if (cmd["params"].is_array()) {
+					if (cmd["params"][0].is_number()) {
+						cmd["params"][0].get_to<uint64_t>(height);
+					}
+					if (cmd["params"][1].is_number()) {
+						cmd["params"][1].get_to<uint64_t>(cp_height);
+					}
+
+					BCBlockHeaderResponse rsp;
+					//do some stuff
+
+					CommandSuccess(id, rsp, jrsp);
+					WriteInternal(std::move(jrsp));					
+				}
+				else {
+					CommandError(id, "Invalid params", -32602, jrsp);
+					WriteInternal(std::move(jrsp));
+				}
 				break;
 			}
 			case ElectrumCommands::BCBlockHeaders: {
+				uint64_t start_header;
+				uint64_t count;
+				uint64_t cp_header = 0;
+
+				nlohmann::json jrsp;
+				if (cmd["params"].is_array()) {
+					if (cmd["params"][0].is_number()) {
+						cmd["params"][0].get_to<uint64_t>(start_header);
+					}
+					if (cmd["params"][1].is_number()) {
+						cmd["params"][1].get_to<uint64_t>(count);
+					}
+					if (cmd["params"][2].is_number()) {
+						cmd["params"][2].get_to<uint64_t>(cp_header);
+					}
+
+					BCBlockHeadersResponse rsp;
+
+					//do some stuff
+
+					CommandSuccess(id, rsp, jrsp);
+					WriteInternal(std::move(jrsp));
+				}
+				else {
+					CommandError(id, "Invalid params", -32602, jrsp);
+					WriteInternal(std::move(jrsp));
+				}
 				break;
 			}
 			case ElectrumCommands::BCEstimatefee: {
@@ -319,13 +430,17 @@ int JsonRPCServer::HandleCommand(nlohmann::json& cmd) {
 				break;
 			}
 			default: {
-				//not possible???
+				nlohmann::json jrsp;
+				CommandError(id, "Method not implemented", -32601, jrsp);
+				WriteInternal(std::move(jrsp));
 				break;
 			}
 		}
 	}
 	else {
-		//need something to write responses
+		nlohmann::json jrsp;
+		CommandError(id, "Method not found", -32601, jrsp);
+		WriteInternal(std::move(jrsp));
 	}
 	return 0;
 }
@@ -337,12 +452,12 @@ void JsonRPCServer::End() {
 #ifndef ELECTRUMZ_NO_SSL
 	mbedtls_ssl_free(this->ssl);
 	free(this->ssl);
-	this->ssl = NULL;
-	this->ssl_config = NULL;
-	this->ssl_buf = NULL;
+	this->ssl = nullptr;
+	this->ssl_config = nullptr;
+	this->ssl_buf = nullptr;
 #endif
 	free(this->buf);
-	this->buf = NULL;
+	this->buf = nullptr;
 
 	uv_close((uv_handle_t*)this->stream, [](uv_handle_t* h) {
 		auto svr = (JsonRPCServer*)uv_handle_get_data(h);
@@ -398,7 +513,7 @@ void JsonRPCServer::InitTLSContext() {
 		}
 
 		return (int)rlen;
-	}, NULL);
+	}, nullptr);
 }
 #endif
 
@@ -407,7 +522,7 @@ int JsonRPCServer::HandleWrite(uv_write_t* req, int status) {
 	
 	srv[1]->base = nullptr;
 	free(srv[0]->base);
-	delete[] srv;
+	//free(srv);
 	free(req);
 	return 1;
 }

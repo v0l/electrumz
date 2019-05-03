@@ -32,7 +32,7 @@ int main(int argc, char* argv[]) {
 
 	spdlog::info("Starting electrumz..");
 	auto cfg = new util::Config("config.json");
-	auto db = new TXODB("db");
+	auto db = new TXODB("txo");
 	if(db->Open()){
 		return 0;
 	}
@@ -42,6 +42,7 @@ int main(int argc, char* argv[]) {
 		auto preloadDir = std::string(*preload->sval);
 		spdlog::info("Preloading DB from: {}", preloadDir);
 		db->PreLoadBlocks(preloadDir);
+		return 0;
 	}
 	
 

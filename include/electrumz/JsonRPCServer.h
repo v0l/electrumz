@@ -10,6 +10,10 @@
 #endif
 
 #include <electrumz/Commands.h>
+#include <electrumz/Config.h>
+#include <electrumz/RPCClient.h>
+
+using namespace electrumz::util;
 
 namespace electrumz {
 	namespace net {
@@ -26,9 +30,9 @@ namespace electrumz {
 		class JsonRPCServer {
 		public:
 #ifndef ELECTRUMZ_NO_SSL
-			JsonRPCServer(uv_tcp_t*, mbedtls_ssl_config*);
+			JsonRPCServer(uv_tcp_t*, const Config*, mbedtls_ssl_config*);
 #else
-			JsonRPCServer(uv_tcp_t*);
+			JsonRPCServer(uv_tcp_t*, const Config*);
 #endif
 
 			int Write(ssize_t, unsigned char*);
@@ -38,8 +42,13 @@ namespace electrumz {
 			int HandleWrite(uv_write_t*, int);
 			int AppendBuffer(ssize_t, unsigned char*);
 			int WriteInternal(ssize_t, unsigned char*);
+			int WriteInternal(nlohmann::json&&);
 			bool IsTLSClientHello(ssize_t, char*);
 			int HandleCommand(nlohmann::json&);
+
+			template<class T>
+			int CommandSuccess(int id, const T&, nlohmann::json&);
+			int CommandError(int id, std::string, int, nlohmann::json&);
 
 #ifndef ELECTRUMZ_NO_SSL
 			void InitTLSContext();
@@ -56,6 +65,8 @@ namespace electrumz {
 			//the connection
 			uv_tcp_t *stream;
 			int state;
+			const Config* config;
+			const RPCClient* rpc;
 
 			unsigned char *buf = nullptr;
 			ssize_t offset = 0;

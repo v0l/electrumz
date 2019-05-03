@@ -26,20 +26,11 @@ namespace electrumz {
 			void PreLoadBlocks(std::string);
 			
 			int GetTXOs(uint256, std::vector<TXO>&);
-			int WriteTXOs(uint256, std::vector<TXO>&);
-
-			/**
-			 * Maps an intput to a scriptHash.
-			*/
-			int InputToAddr(COutPoint&, uint256&);
 		private:
 			static constexpr char* TXO_DBI = "txo";
-			static constexpr char* I2A_DBI = "i2a";
 
 			std::string dbPath;
 			MDB_env *env;
-			std::mutex txdbMutex;
-			std::mutex i2aMutex;
 
 			/**
 			 * Appends a TXO to a scriptHash.

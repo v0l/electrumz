@@ -35,3 +35,6 @@ build/
 .vscode/
 db/
 config.json
+.vs/
+bin/
+obj/

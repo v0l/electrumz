@@ -22,7 +22,6 @@ constexpr mdb_size_t MAPSIZE_BASE_UNIT = 1024 * 1024 * 1024;
 
 TXODB::TXODB(std::string path) {
 	this->dbPath = path;
-	std::filesystem::create_directories(this->dbPath);
 }
 
 int TXODB::Open() {
@@ -31,11 +30,11 @@ int TXODB::Open() {
 		spdlog::error("mdb create failed {}", mdb_strerror(err));
 		return err;
 	}
-	if (err = mdb_env_set_maxdbs(this->env, 2)) {
+	if (err = mdb_env_set_maxdbs(this->env, 3)) {
 		spdlog::error("Failed to set max dbs: {}", mdb_strerror(err));
 		return err;
 	}
-	if (err = mdb_env_open(this->env, this->dbPath.c_str(), MDB_CREATE | MDB_WRITEMAP | MDB_MAPASYNC, 0644)) {
+	if (err = mdb_env_open(this->env, this->dbPath.c_str(), MDB_NOTLS | MDB_CREATE | MDB_WRITEMAP | MDB_MAPASYNC | MDB_NOSUBDIR, 0644)) {
 		spdlog::error("mdb open failed: {}", mdb_strerror(err));
 		return err;
 	}
@@ -58,7 +57,6 @@ int TXODB::Open() {
 }
 
 int TXODB::GetTXOs(uint256 scriptHash, std::vector<TXO> &ntx) {
-	std::lock_guard txo_lock(this->txdbMutex);
 	int err = 0;
 	MDB_txn *txn;
 	MDB_dbi dbi;
@@ -86,43 +84,6 @@ int TXODB::GetTXOs(uint256 scriptHash, std::vector<TXO> &ntx) {
 		CDataStream ds((char*)val.mv_data, (char*)val.mv_data + val.mv_size, SER_DISK, PROTOCOL_VERSION);
 		Unserialize(ds, ntx);
 
-		mdb_txn_commit(txn);
-		return TXO_OK;
-	}
-}
-
-int TXODB::WriteTXOs(uint256 scriptHash, std::vector<TXO> &txns) {
-	std::lock_guard txo_lock(this->txdbMutex);
-	int err = 0;
-	MDB_txn *txn;
-	MDB_dbi dbi;
-	if (!(err = StartTXOTxn(&txn, TXO_DBI, dbi))) {
-		return err;
-	}
-
-	MDB_val key{ 
-		32,
-		(unsigned char*)&scriptHash
-	};
-	
-	CDataStream ds(SER_DISK, PROTOCOL_VERSION);
-	ds.reserve(txns.size() * TXO::ApproxSize);
-	ds << txns;
-
-	MDB_val val = {
-		ds.size(),
-		ds.data()
-	};
-
-	put_again:
-	err = mdb_put(txn, dbi, &key, &val, MDB_NODUPDATA);
-	if (err == MDB_MAP_FULL || err == MDB_TXN_FULL || err == EINVAL) {
-		spdlog::error("WriteTXOs failed {}", mdb_strerror(err));
-		mdb_txn_abort(txn);
-		err == MDB_MAP_FULL && (err = this->IncreaseMapSize());
-		return err;
-	}
-	else {
 		mdb_txn_commit(txn);
 		return TXO_OK;
 	}
@@ -161,16 +122,12 @@ int TXODB::StartTXOTxn(MDB_txn **txn, const char* dbn, MDB_dbi& dbi) {
 	return TXO_OK;
 }
 
-int TXODB::InputToAddr(COutPoint& output, uint256& scriptHash) {
-	return TXO_OK;
-}
 
 int TXODB::InternalSpendTXO(COutPoint& prevout, COutPoint& spendingTx) {
 	//std::scoped_lock txo_lock(this->txdbMutex, this->i2aMutex);
-	int err = 0;
+	/*int err = 0;
 	MDB_txn *txn;
 	MDB_dbi dbi;
-	MDB_dbi dbi_i2a;
 	if (err = mdb_txn_begin(this->env, nullptr, 0, &txn)) {
 		spdlog::error("Failed to start txo: {}", mdb_strerror(err));
 		return err;
@@ -178,12 +135,6 @@ int TXODB::InternalSpendTXO(COutPoint& prevout, COutPoint& spendingTx) {
 
 	if (err = mdb_dbi_open(txn, TXO_DBI, MDB_CREATE, &dbi)) {
 		spdlog::error("Failed to open dbi {}: {}", TXO_DBI, mdb_strerror(err));
-		err == MDB_MAP_FULL && (err = this->IncreaseMapSize());
-		return err;
-	}
-	
-	if (err = mdb_dbi_open(txn, I2A_DBI, MDB_CREATE, &dbi_i2a)) {
-		spdlog::error("Failed to open dbi {}: {}", I2A_DBI, mdb_strerror(err));
 		err == MDB_MAP_FULL && (err = this->IncreaseMapSize());
 		return err;
 	}
@@ -251,7 +202,7 @@ int TXODB::InternalSpendTXO(COutPoint& prevout, COutPoint& spendingTx) {
 		return err;
 	}
 
-	mdb_txn_commit(txn);
+	mdb_txn_commit(txn);*/
 	return TXO_OK;
 }
 
@@ -259,20 +210,25 @@ int TXODB::InternalAddTXO(TXO& nTx, MDB_txn* txn, MDB_dbi& dbi, MDB_dbi& dbi_i2a
 	//std::scoped_lock txo_lock(this->txdbMutex, this->i2aMutex);
 	int err = 0;
 	
-	MDB_val key {
-		32,
-		nTx.scriptHash.begin()
-	};
+	//output point to store for this address
+	COutPoint op;
+	op.hash = nTx.txHash;
+	op.n = nTx.n;
 
 	CDataStream ds(SER_DISK, PROTOCOL_VERSION);
-	ds << nTx;
+	ds << op;
 		
-	MDB_val val_write = {
+	//scriptHash(address) key
+	MDB_val addr_key{
+		nTx.scriptHash.size(),
+		nTx.scriptHash.begin()
+	};
+	MDB_val addr_val = {
 		ds.size(),
 		ds.data()
 	};
 
-	err = mdb_put(txn, dbi, &key, &val_write, NULL);
+	err = mdb_put(txn, dbi, &addr_key, &addr_val, NULL);
 	if (err != 0) {
 		spdlog::error("AddTXOs write failed {}", mdb_strerror(err));
 		if(err == MDB_MAP_FULL) {
@@ -281,27 +237,30 @@ int TXODB::InternalAddTXO(TXO& nTx, MDB_txn* txn, MDB_dbi& dbi, MDB_dbi& dbi_i2a
 		} 
 		return err;
 	}
-		
-	//track new outputs to their address
-	//COutPoint -> ScriptHash
-	ds.clear();
-	COutPoint nout;
-	nout.hash = nTx.txHash;
-	nout.n = nTx.n;
 
-	ds << nout;
-	MDB_val key_i2a = {
+	//clear the datastream and store the txo
+	ds.clear();
+	ds << nTx;
+
+	//this should probably be in a seperate db
+	//but instead we rely on no hash collisions for sha256
+	//txHash <> scriptHash could collide
+	MDB_val tx_key = {
+		nTx.txHash.size(),
+		nTx.txHash.begin()
+	};
+	MDB_val tx_val = {
 		ds.size(),
 		ds.data()
 	};
 
-	err = mdb_put(txn, dbi_i2a, &key_i2a, &key, NULL);
+	err = mdb_put(txn, dbi, &tx_key, &tx_val, NULL);
 	if (err != 0) {
-		spdlog::error("AddTXOs(i2a) write failed {}", mdb_strerror(err));
-		if(err == MDB_MAP_FULL) {
+		spdlog::error("AddTXO write failed {}", mdb_strerror(err));
+		if (err == MDB_MAP_FULL) {
 			mdb_txn_abort(txn);
 			err = this->IncreaseMapSize();
-		} 
+		}
 		return err;
 	}
 
@@ -312,7 +271,7 @@ int TXODB::InternalAddTXO(TXO& nTx, MDB_txn* txn, MDB_dbi& dbi, MDB_dbi& dbi_i2a
 void TXODB::PreLoadBlocks(std::string path) {
 	spdlog::info("Preload starting.. this will take some time.");
 	
-	mdb_env_set_flags(this->env, MDB_NOSYNC, 1);
+	//mdb_env_set_flags(this->env, MDB_NOSYNC, 1);
 
 	std::vector<std::filesystem::path> blks;
 	std::mutex blks_pop_lock;
@@ -400,12 +359,6 @@ void TXODB::PreLoadBlocks(std::string path) {
 								return err;
 							}
 							
-							if (err = mdb_dbi_open(txn, I2A_DBI, MDB_CREATE, &dbi_i2a)) {
-								spdlog::error("Failed to open dbi {}: {}", I2A_DBI, mdb_strerror(err));
-								err == MDB_MAP_FULL && (err = this->IncreaseMapSize());
-								return err;
-							}
-
 							uint256 blkHash = blk.GetHash();
 							for (auto tx : blk.vtx) {
 								uint256 txHash = tx->GetHash();
@@ -431,12 +384,7 @@ void TXODB::PreLoadBlocks(std::string path) {
 									for (auto ntxo : tx->vout) {
 										uint256 sh = SHash(ntxo.scriptPubKey.begin(), ntxo.scriptPubKey.end());
 
-										TXO t;
-										t.scriptHash = sh;
-										t.txHash = txHash;
-										t.n = txop;
-										t.value = ntxo.nValue;
-										t.spendingTxi.SetNull();
+										TXO t(sh, txHash, txop++, ntxo.nValue, 0);
 
 										if ((err = this->InternalAddTXO(t, txn, dbi, dbi_i2a)) != TXO_OK) {
 											if(err != TXO_RESIZED){ //in this case the tx is already aborted
@@ -445,7 +393,6 @@ void TXODB::PreLoadBlocks(std::string path) {
 											goto try_block_again;
 										}
 
-										txop++;
 										nTxo++;
 									}
 								}
@@ -476,7 +423,7 @@ void TXODB::PreLoadBlocks(std::string path) {
 			}
 
 			bf.fclose();
-			mdb_env_sync(this->env, 1);
+			//mdb_env_sync(this->env, 1);
 		}
 	};
 
