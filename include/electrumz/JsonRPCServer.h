@@ -12,8 +12,10 @@
 #include <electrumz/Commands.h>
 #include <electrumz/Config.h>
 #include <electrumz/RPCClient.h>
+#include <electrumz/TXODB.h>
 
 using namespace electrumz::util;
+using namespace electrumz::blockchain;
 
 namespace electrumz {
 	namespace net {
@@ -30,9 +32,9 @@ namespace electrumz {
 		class JsonRPCServer {
 		public:
 #ifndef ELECTRUMZ_NO_SSL
-			JsonRPCServer(uv_tcp_t*, const Config*, mbedtls_ssl_config*);
+			JsonRPCServer(TXODB *db, uv_tcp_t*, const Config*, mbedtls_ssl_config*);
 #else
-			JsonRPCServer(uv_tcp_t*, const Config*);
+			JsonRPCServer(TXODB* db, uv_tcp_t*, const Config*);
 #endif
 
 			int Write(ssize_t, unsigned char*);
@@ -67,6 +69,7 @@ namespace electrumz {
 			int state;
 			const Config* config;
 			const RPCClient* rpc;
+			TXODB* db;
 
 			unsigned char *buf = nullptr;
 			ssize_t offset = 0;

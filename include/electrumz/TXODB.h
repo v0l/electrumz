@@ -8,6 +8,10 @@
 #include <string>
 #include <lmdb.h>
 
+#define DBI_TXO "txo"
+#define DBI_ADDR "addr"
+#define DBI_BLK "blk"
+
 namespace electrumz {
 	namespace blockchain {
 		enum TXODB_ERR {
@@ -26,14 +30,15 @@ namespace electrumz {
 			void PreLoadBlocks(std::string);
 			
 			int GetTXOs(uint256, std::vector<TXO>&);
+			int GetTXOStats(MDB_stat* stats, const char* dbn);
 		private:
-			static constexpr char* TXO_DBI = "txo";
 
 			std::string dbPath;
 			MDB_env *env;
+			std::mutex resize_lock;
 
 			/**
-			 * Appends a TXO to a scriptHash.
+			 * Appends a new UTXO to the database.
 			*/
 			int InternalAddTXO(TXO&, MDB_txn*, MDB_dbi&, MDB_dbi&);
 			

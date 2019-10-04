@@ -30,11 +30,31 @@ int main(int argc, char* argv[]) {
 		return nerrors > 0 ? 1 : 0;
 	}
 
+#ifdef _DEBUG
+	spdlog::set_level(spdlog::level::level_enum::debug);
+#endif
 	spdlog::info("Starting electrumz..");
 	auto cfg = new util::Config("config.json");
-	auto db = new TXODB("txo");
+	auto db = new TXODB("db");
 	if(db->Open()){
 		return 0;
+	}
+	else {
+		MDB_stat stat;
+		if (db->GetTXOStats(&stat, DBI_TXO)) {
+			return 0;
+		}
+		spdlog::info("TXO Keys: {0:n}", stat.ms_entries);
+
+		if (db->GetTXOStats(&stat, DBI_ADDR)) {
+			return 0;
+		}
+		spdlog::info("ADDR Keys: {0:n}", stat.ms_entries);
+
+		if (db->GetTXOStats(&stat, DBI_BLK)) {
+			return 0;
+		}
+		spdlog::info("BLK Keys: {0:n}", stat.ms_entries);
 	}
 
 	spdlog::info("LMDB Version: {}", db->GetLMDBVersion());

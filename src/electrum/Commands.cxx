@@ -1,10 +1,11 @@
 #include <electrumz/Commands.h>
+#include <electrumz/bitcoin/util_strencodings.h>
 
 using namespace electrumz::commands;
 
 void ::to_json(nlohmann::json& j, const BCBlockHeaderResponse& r) {
-	j = nlohmann::json{ 
-		{ "branch", r.branch } 
+	j = nlohmann::json{
+		{ "branch", r.branch }
 	};
 }
 
@@ -17,7 +18,10 @@ void ::to_json(nlohmann::json& j, const BCEstimatefeeResponse& r) {
 }
 
 void ::to_json(nlohmann::json& j, const BCHeadersSubscribeResponse& r) {
-	j = nlohmann::json{ };
+	j = nlohmann::json{
+		{"height", r.height},
+		{"hex", HexStr(r.hex) }
+	};
 }
 
 void ::to_json(nlohmann::json& j, const BCRelayfeeResponse& r) {
@@ -108,5 +112,8 @@ void ::to_json(nlohmann::json& j, const SVPingResponse& r) {
 }
 
 void ::to_json(nlohmann::json& j, const SVVersionResponse& r) {
-	j = nlohmann::json{ };
+	j = nlohmann::json{
+		{"software_version", r.software_version, },
+		{"protocol_version", r.protocol_version}
+	};
 }

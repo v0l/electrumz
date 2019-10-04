@@ -30,7 +30,7 @@ namespace electrumz {
 			void OnConnect(uv_stream_t *s, int status);
 
 			const Config* cfg;
-			const TXODB *db;
+			TXODB *db;
 
 			bool ssl_enabled;
 			std::thread worker_thread;

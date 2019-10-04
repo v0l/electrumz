@@ -808,10 +808,7 @@ public:
     //! rewind to a given reading position
     bool SetPos(uint64_t nPos) {
         nReadPos = nPos;
-        if (nReadPos + nRewind < nSrcPos) {
-            nReadPos = nSrcPos - nRewind;
-            return false;
-        } else if (nReadPos > nSrcPos) {
+        if (nReadPos > nSrcPos) {
             nReadPos = nSrcPos;
             return false;
         } else {

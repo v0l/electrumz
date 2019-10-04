@@ -147,9 +147,9 @@ void NetWorker::OnConnect(uv_stream_t* server, int status) {
 	if (uv_accept(server, (uv_stream_t*)client) == 0) {
 		spdlog::info("New connection!");
 #ifndef ELECTRUMZ_NO_SSL
-		new JsonRPCServer(client, this->cfg, this->ssl_config);
+		new JsonRPCServer(this->db, client, this->cfg, this->ssl_config);
 #else
-		new JsonRPCServer(client);
+		new JsonRPCServer(this->db, client);
 #endif
 	}
 }

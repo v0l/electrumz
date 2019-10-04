@@ -1,4 +1,5 @@
 #include <electrumz/JsonRPCServer.h>
+#include <electrumz/bitcoin/util_strencodings.h>
 
 #if defined(_DEBUG) && !defined(ELECTRUMZ_NO_SSL)
 #include <mbedtls/debug.h>
@@ -27,13 +28,13 @@ using namespace electrumz::commands;
 #endif
 
 #ifndef ELECTRUMZ_NO_SSL
-JsonRPCServer::JsonRPCServer(uv_tcp_t *s, const Config* cfg, mbedtls_ssl_config* ssl_cfg) 
-	: stream(s), config(cfg), ssl_config(ssl_cfg), ssl(nullptr) {
+JsonRPCServer::JsonRPCServer(TXODB* db, uv_tcp_t* s, const Config* cfg, mbedtls_ssl_config* ssl_cfg)
+	: db(db), stream(s), config(cfg), ssl_config(ssl_cfg), ssl(nullptr) {
 #else
-JsonRPCServer::JsonRPCServer(uv_tcp_t *s, const Config* cfg) : stream(s), config(cfg) {
+JsonRPCServer::JsonRPCServer(TXODB * db, uv_tcp_t * s, const Config * cfg) : db(db), stream(s), config(cfg) {
 #endif
 	this->state = JsonRPCState::START;
-	
+
 	//create rpc client
 	//later this will need to be shared or pooled
 	// 1:1 rpc connections is not good..
@@ -49,12 +50,12 @@ JsonRPCServer::JsonRPCServer(uv_tcp_t *s, const Config* cfg) : stream(s), config
 	uv_read_start((uv_stream_t*)s, [](uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
 		buf->base = (char*)malloc(JSONRPC_BUFF_LEN);
 		buf->len = JSONRPC_BUFF_LEN;
-	}, [](uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
-		auto rpc = (JsonRPCServer*)uv_handle_get_data((uv_handle_t*)stream);
-		if (!rpc->HandleRead(nread, buf)) {
-			rpc->End();
-		}
-	});
+		}, [](uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
+			auto rpc = (JsonRPCServer*)uv_handle_get_data((uv_handle_t*)stream);
+			if (!rpc->HandleRead(nread, buf)) {
+				rpc->End();
+			}
+		});
 }
 
 #ifndef ELECTRUMZ_NO_SSL
@@ -80,6 +81,9 @@ int JsonRPCServer::TryHandshake() {
 #endif
 
 int JsonRPCServer::AppendBuffer(ssize_t nread, unsigned char* buf) {
+	if (nread <= 0)
+		return 0;
+
 	//make sure we have enough space to copy
 	if (nread + this->offset > this->len) {
 		auto min_size = this->offset + nread + 1;
@@ -99,6 +103,7 @@ int JsonRPCServer::AppendBuffer(ssize_t nread, unsigned char* buf) {
 
 	memcpy(this->buf + this->offset, buf, nread);
 	this->offset += nread;
+	spdlog::debug("Internal offset is {}", this->offset);
 	return 1;
 }
 
@@ -116,7 +121,7 @@ int JsonRPCServer::Write(ssize_t len, unsigned char* buf) {
 }
 
 int JsonRPCServer::WriteInternal(ssize_t len, unsigned char* buf) {
-	uv_buf_t *sbuf = new uv_buf_t[2];
+	uv_buf_t* sbuf = new uv_buf_t[2];
 	sbuf[0].base = (char*)malloc(len);
 	sbuf[0].len = len;
 	sbuf[1].base = (char*)this; //this will do as our data pointer
@@ -124,13 +129,13 @@ int JsonRPCServer::WriteInternal(ssize_t len, unsigned char* buf) {
 
 	memcpy(sbuf[0].base, buf, len);
 
-	uv_write_t *req = new uv_write_t;
+	uv_write_t* req = new uv_write_t;
 	uv_req_set_data((uv_req_t*)req, sbuf);
 
 	if (uv_write(req, (uv_stream_t*)this->stream, sbuf, 1, [](uv_write_t* req, int status) {
 		auto srv = (uv_buf_t(*)[2])uv_req_get_data((uv_req_t*)req);
 		((JsonRPCServer*)srv[1]->base)->HandleWrite(req, status);
-	})) {
+		})) {
 		this->HandleWrite(req, 0);
 		spdlog::error("Something went wrong");
 		return 0;
@@ -138,7 +143,7 @@ int JsonRPCServer::WriteInternal(ssize_t len, unsigned char* buf) {
 	return len;
 }
 
-int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
+int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t * buf) {
 	spdlog::info("Got {} bytes from socket.", nread);
 	if (nread <= 0) {
 		spdlog::error("Connection error: {}", uv_strerror(nread));
@@ -219,6 +224,21 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 	}
 #endif
 
+	//Add the internal buffer if we have any
+	if (this->offset > 0) {
+		auto tmpBuf = buf_check;
+		buf_check = (unsigned char*)malloc(buf_len + this->offset);
+		memcpy(buf_check, this->buf, this->offset); //copy internal buffer to new buf_check
+		memcpy(buf_check + this->offset, tmpBuf, buf_len);
+		buf_len += this->offset; //Adjust to new buf_check len including offset
+		this->offset = 0; //clear our internal buffer offset
+		spdlog::debug("Internal offset is {}", this->offset);
+		if (shouldFree) {
+			free(tmpBuf);
+		}
+		shouldFree = true; //always free buf_check because we just malloc'd it
+	}
+
 	//detect http request
 	char* http = strstr((char*)buf_check, "GET");
 	if ((unsigned char*)http == buf_check) {
@@ -232,15 +252,29 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 		return 1; //nothing to do for http
 	}
 
-	char* nl = strchr((char*)buf_check, JSONRPC_DELIM);
+	auto readOffset = 0;
+parse_again:
+	char* nl = strchr((char*)buf_check + readOffset, JSONRPC_DELIM);
 	if (nl != nullptr) {
-		nlohmann::json req = nlohmann::json::parse(nlohmann::detail::input_adapter(buf_check, nl - (char*)buf_check));
-		
-		spdlog::info("Got command: {}", req.dump());
-		this->HandleCommand(req);
+		auto mlen = nl - ((char*)buf_check + readOffset);
+		try {
+			nlohmann::json req = nlohmann::json::parse(nlohmann::detail::input_adapter(buf_check + readOffset, mlen));
+			spdlog::info("Got command: {}", req.dump());
+			this->HandleCommand(req);
+		}
+		catch (nlohmann::detail::exception ex) {
+			spdlog::error("Parser exception: {}", ex.what());
+			return 0;
+		}
+
+		if (mlen < nread - 1) {
+			readOffset += mlen + 1;
+			buf_len -= mlen + 1;
+			goto parse_again;
+		}
 	}
 	else {
-		int ret = this->AppendBuffer(buf_len, buf_check);
+		int ret = this->AppendBuffer(buf_len, buf_check + readOffset);
 #ifndef ELECTRUMZ_NO_SSL
 		if (shouldFree) {
 			free(buf_check);
@@ -258,11 +292,11 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t* buf) {
 }
 
 template<class T>
-int JsonRPCServer::CommandSuccess(int id, const T& cmd, nlohmann::json& j) {
+int JsonRPCServer::CommandSuccess(int id, const T & cmd, nlohmann::json & j) {
 	j.clear();
 	j["id"] = id;
 	j["jsonrpc"] = "2.0";
-	
+
 	nlohmann::json result;
 	to_json(result, cmd);
 	j["result"] = result;
@@ -270,7 +304,7 @@ int JsonRPCServer::CommandSuccess(int id, const T& cmd, nlohmann::json& j) {
 	return 1;
 }
 
-int JsonRPCServer::CommandError(int id, std::string msg, int err, nlohmann::json& j) {
+int JsonRPCServer::CommandError(int id, std::string msg, int err, nlohmann::json & j) {
 	j.clear();
 	j["id"] = id;
 	j["jsonrpc"] = "2.0";
@@ -284,7 +318,7 @@ int JsonRPCServer::CommandError(int id, std::string msg, int err, nlohmann::json
 	return 1;
 }
 
-int JsonRPCServer::WriteInternal(nlohmann::json&& data) {
+int JsonRPCServer::WriteInternal(nlohmann::json && data) {
 	auto d = data.dump(-1, ' ', true);
 	spdlog::info("Writing response: {}", d);
 	d.resize(d.size() + 1, '\n');
@@ -292,7 +326,7 @@ int JsonRPCServer::WriteInternal(nlohmann::json&& data) {
 	return WriteInternal(d.size(), (unsigned char*)d.data());
 }
 
-int JsonRPCServer::HandleCommand(nlohmann::json& cmd) {
+int JsonRPCServer::HandleCommand(nlohmann::json & cmd) {
 	if (cmd.is_null()) {
 		nlohmann::json jrsp;
 		CommandError(0, "Parser error", -32700, jrsp);
@@ -303,138 +337,172 @@ int JsonRPCServer::HandleCommand(nlohmann::json& cmd) {
 	auto id = cmd["id"].get<int>();
 	if (CommandMap.find(method) != CommandMap.end()) {
 		auto method_mapped = CommandMap.at(method);
-		
+
 		switch (method_mapped) {
-			case ElectrumCommands::BCBlockHeader: {
-				uint64_t height;
-				uint64_t cp_height = 0;
+		case ElectrumCommands::BCBlockHeader: {
+			uint64_t height;
+			uint64_t cp_height = 0;
 
-				nlohmann::json jrsp;
-				if (cmd["params"].is_array()) {
-					if (cmd["params"][0].is_number()) {
-						cmd["params"][0].get_to<uint64_t>(height);
-					}
-					if (cmd["params"][1].is_number()) {
-						cmd["params"][1].get_to<uint64_t>(cp_height);
-					}
-
-					BCBlockHeaderResponse rsp;
-					//do some stuff
-
-					CommandSuccess(id, rsp, jrsp);
-					WriteInternal(std::move(jrsp));					
+			nlohmann::json jrsp;
+			if (cmd["params"].is_array()) {
+				if (cmd["params"][0].is_number()) {
+					cmd["params"][0].get_to<uint64_t>(height);
 				}
-				else {
-					CommandError(id, "Invalid params", -32602, jrsp);
-					WriteInternal(std::move(jrsp));
+				if (cmd["params"][1].is_number()) {
+					cmd["params"][1].get_to<uint64_t>(cp_height);
 				}
-				break;
-			}
-			case ElectrumCommands::BCBlockHeaders: {
-				uint64_t start_header;
-				uint64_t count;
-				uint64_t cp_header = 0;
 
-				nlohmann::json jrsp;
-				if (cmd["params"].is_array()) {
-					if (cmd["params"][0].is_number()) {
-						cmd["params"][0].get_to<uint64_t>(start_header);
-					}
-					if (cmd["params"][1].is_number()) {
-						cmd["params"][1].get_to<uint64_t>(count);
-					}
-					if (cmd["params"][2].is_number()) {
-						cmd["params"][2].get_to<uint64_t>(cp_header);
-					}
+				BCBlockHeaderResponse rsp;
+				//do some stuff
 
-					BCBlockHeadersResponse rsp;
-
-					//do some stuff
-
-					CommandSuccess(id, rsp, jrsp);
-					WriteInternal(std::move(jrsp));
-				}
-				else {
-					CommandError(id, "Invalid params", -32602, jrsp);
-					WriteInternal(std::move(jrsp));
-				}
-				break;
-			}
-			case ElectrumCommands::BCEstimatefee: {
-				break;
-			}
-			case ElectrumCommands::BCHeadersSubscribe: {
-				break;
-			}
-			case ElectrumCommands::BCRelayfee: {
-				break;
-			}
-			case ElectrumCommands::SHGetBalance: {
-				break;
-			}
-			case ElectrumCommands::SHGetHistory: {
-				break;
-			}
-			case ElectrumCommands::SHGetMempool: {
-				break;
-			}
-			case ElectrumCommands::SHHistory: {
-				break;
-			}
-			case ElectrumCommands::SHListUnspent: {
-				break;
-			}
-			case ElectrumCommands::SHSubscribe: {
-				break;
-			}
-			case ElectrumCommands::SHUTXOS: {
-				break;
-			}
-			case ElectrumCommands::TXBroadcast: {
-				break;
-			}
-			case ElectrumCommands::TXGet: {
-				break;
-			}
-			case ElectrumCommands::TXGetMerkle: {
-				break;
-			}
-			case ElectrumCommands::TXIdFromPos: {
-				break;
-			}
-			case ElectrumCommands::MPChanges: {
-				break;
-			}
-			case ElectrumCommands::MPGetFeeHistogram: {
-				break;
-			}
-			case ElectrumCommands::SVAddPeer: {
-				break;
-			}
-			case ElectrumCommands::SVBanner: {
-				break;
-			}
-			case ElectrumCommands::SVDonationAddress: {
-				break;
-			}
-			case ElectrumCommands::SVFeatures: {
-				break;
-			}
-			case ElectrumCommands::SVPeersSubscribe: {
-				break;
-			}
-			case ElectrumCommands::SVPing: {
-				break;
-			}
-			case ElectrumCommands::SVVersion: {
-				break;
-			}
-			default: {
-				nlohmann::json jrsp;
-				CommandError(id, "Method not implemented", -32601, jrsp);
+				CommandSuccess(id, rsp, jrsp);
 				WriteInternal(std::move(jrsp));
-				break;
 			}
+			else {
+				CommandError(id, "Invalid params", -32602, jrsp);
+				WriteInternal(std::move(jrsp));
+			}
+			break;
+		}
+		case ElectrumCommands::BCBlockHeaders: {
+			uint64_t start_header;
+			uint64_t count;
+			uint64_t cp_header = 0;
+
+			nlohmann::json jrsp;
+			if (cmd["params"].is_array()) {
+				if (cmd["params"][0].is_number()) {
+					cmd["params"][0].get_to<uint64_t>(start_header);
+				}
+				if (cmd["params"][1].is_number()) {
+					cmd["params"][1].get_to<uint64_t>(count);
+				}
+				if (cmd["params"][2].is_number()) {
+					cmd["params"][2].get_to<uint64_t>(cp_header);
+				}
+
+				BCBlockHeadersResponse rsp;
+
+				//do some stuff
+
+				CommandSuccess(id, rsp, jrsp);
+				WriteInternal(std::move(jrsp));
+			}
+			else {
+				CommandError(id, "Invalid params", -32602, jrsp);
+				WriteInternal(std::move(jrsp));
+			}
+			break;
+		}
+		case ElectrumCommands::BCEstimatefee: {
+			break;
+		}
+		case ElectrumCommands::BCHeadersSubscribe: {
+			nlohmann::json jrsp;
+			BCHeadersSubscribeResponse rsp = { 10, ParseHex("01000030c306405f586ae1ae2330cb3f8a1ecf5e8f50192682656ddb5fa000fb486af66f4d304c05be48e86ad3f56d8f639d5c124f3cedb3a08d539ef5aabbdba9582708f32e975dffff7f2006000000") };
+
+			CommandSuccess(id, rsp, jrsp);
+			WriteInternal(std::move(jrsp));
+			break;
+		}
+		case ElectrumCommands::BCRelayfee: {
+			break;
+		}
+		case ElectrumCommands::SHGetBalance: {
+			break;
+		}
+		case ElectrumCommands::SHGetHistory: {
+			break;
+		}
+		case ElectrumCommands::SHGetMempool: {
+			break;
+		}
+		case ElectrumCommands::SHHistory: {
+			break;
+		}
+		case ElectrumCommands::SHListUnspent: {
+			break;
+		}
+		case ElectrumCommands::SHSubscribe: {
+			std::string hash;
+
+			nlohmann::json jrsp;
+			if (cmd["params"].is_array()) {
+				if (cmd["params"][0].is_string()) {
+					cmd["params"][0].get_to<std::string>(hash);
+				}
+
+				std::vector<TXO> txn;
+				auto hexHash = ParseHex(hash);
+				std::reverse(hexHash.begin(), hexHash.end());//dirty reverse
+				db->GetTXOs(uint256(hexHash), txn); 
+
+				SHSubscribeResponse rsp;
+
+				//do some stuff
+
+				CommandSuccess(id, rsp, jrsp);
+				WriteInternal(std::move(jrsp));
+			}
+			else {
+				CommandError(id, "Invalid params", -32602, jrsp);
+				WriteInternal(std::move(jrsp));
+			}
+			break;
+		}
+		case ElectrumCommands::SHUTXOS: {
+			break;
+		}
+		case ElectrumCommands::TXBroadcast: {
+			break;
+		}
+		case ElectrumCommands::TXGet: {
+			break;
+		}
+		case ElectrumCommands::TXGetMerkle: {
+			break;
+		}
+		case ElectrumCommands::TXIdFromPos: {
+			break;
+		}
+		case ElectrumCommands::MPChanges: {
+			break;
+		}
+		case ElectrumCommands::MPGetFeeHistogram: {
+			break;
+		}
+		case ElectrumCommands::SVAddPeer: {
+			break;
+		}
+		case ElectrumCommands::SVBanner: {
+			break;
+		}
+		case ElectrumCommands::SVDonationAddress: {
+			break;
+		}
+		case ElectrumCommands::SVFeatures: {
+			break;
+		}
+		case ElectrumCommands::SVPeersSubscribe: {
+			break;
+		}
+		case ElectrumCommands::SVPing: {
+			break;
+		}
+		case ElectrumCommands::SVVersion: {
+			nlohmann::json rsp;
+			SVVersionResponse v = { "ElectrumZ", "1.4.1" };
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
+			break;
+		}
+		default: {
+			nlohmann::json jrsp;
+			CommandError(id, "Method not implemented", -32601, jrsp);
+			WriteInternal(std::move(jrsp));
+			break;
+		}
 		}
 	}
 	else {
@@ -465,7 +533,7 @@ void JsonRPCServer::End() {
 		spdlog::info("Connection closed..");
 		free(svr);
 		free(h);
-	});
+		});
 }
 
 bool JsonRPCServer::IsTLSClientHello(ssize_t nread, char* buf) {
@@ -480,7 +548,7 @@ bool JsonRPCServer::IsTLSClientHello(ssize_t nread, char* buf) {
 #ifndef ELECTRUMZ_NO_SSL
 void JsonRPCServer::InitTLSContext() {
 	this->state |= JsonRPCState::SSL_NORMAL;
-	
+
 	this->ssl = (mbedtls_ssl_context*)malloc(sizeof(mbedtls_ssl_context));
 	memset(this->ssl, 0, sizeof(mbedtls_ssl_context));
 
@@ -489,37 +557,37 @@ void JsonRPCServer::InitTLSContext() {
 
 	//set bio cbs, ideally we could just pass our alredy read buffer
 	//but this is not possible with mbedtls (that i know of)
-	mbedtls_ssl_set_bio(this->ssl, this, [](void *ctx, const unsigned char *buf, size_t len) {
+	mbedtls_ssl_set_bio(this->ssl, this, [](void* ctx, const unsigned char* buf, size_t len) {
 		auto srv = (JsonRPCServer*)ctx;
 		return srv->WriteInternal(len, const_cast<unsigned char*>(buf));
-	}, [](void *ctx, unsigned char *buf, size_t len) {
-		auto srv = (JsonRPCServer*)ctx;
-		if (srv->ssl_buf_len == 0) {
-			return MBEDTLS_ERR_SSL_WANT_READ;
-		}
+		}, [](void* ctx, unsigned char* buf, size_t len) {
+			auto srv = (JsonRPCServer*)ctx;
+			if (srv->ssl_buf_len == 0) {
+				return MBEDTLS_ERR_SSL_WANT_READ;
+			}
 
-		auto rlen = std::min(srv->ssl_buf_len - srv->ssl_buf_offset, (ssize_t)len);
-		memcpy(buf, srv->ssl_buf + srv->ssl_buf_offset, rlen);
+			auto rlen = std::min(srv->ssl_buf_len - srv->ssl_buf_offset, (ssize_t)len);
+			memcpy(buf, srv->ssl_buf + srv->ssl_buf_offset, rlen);
 
-		if (rlen == srv->ssl_buf_len - srv->ssl_buf_offset) {
-			//free the libuv buffer we dont need it now
-			free(srv->ssl_buf);
-			srv->ssl_buf = nullptr;
-			srv->ssl_buf_len = 0;
-			srv->ssl_buf_offset = 0;
-		}
-		else {
-			srv->ssl_buf_offset += rlen;
-		}
+			if (rlen == srv->ssl_buf_len - srv->ssl_buf_offset) {
+				//free the libuv buffer we dont need it now
+				free(srv->ssl_buf);
+				srv->ssl_buf = nullptr;
+				srv->ssl_buf_len = 0;
+				srv->ssl_buf_offset = 0;
+			}
+			else {
+				srv->ssl_buf_offset += rlen;
+			}
 
-		return (int)rlen;
-	}, nullptr);
+			return (int)rlen;
+		}, nullptr);
 }
 #endif
 
-int JsonRPCServer::HandleWrite(uv_write_t* req, int status) {
+int JsonRPCServer::HandleWrite(uv_write_t * req, int status) {
 	auto srv = (uv_buf_t(*)[2])uv_req_get_data((uv_req_t*)req);
-	
+
 	srv[1]->base = nullptr;
 	free(srv[0]->base);
 	//free(srv);
