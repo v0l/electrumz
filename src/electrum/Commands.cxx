@@ -1,12 +1,57 @@
 #include <electrumz/Commands.h>
 #include <electrumz/bitcoin/util_strencodings.h>
 
+#include <fmt/format.h>
+#include <optional>
+
 using namespace electrumz::commands;
 
-void ::to_json(nlohmann::json& j, const BCBlockHeaderResponse& r) {
-	j = nlohmann::json{
-		{ "branch", r.branch }
+void ::to_json(nlohmann::json& j, const std::string& r) {
+	j = r;
+}
+
+template<class T>
+void ::to_json(nlohmann::json& j, const std::vector<T>& r) {
+	j = nlohmann::json{};
+	for (auto x : r) {
+		nlohmann::json nv;
+		to_json(nv, x);
+		j.push_back(nv);
+	}
+}
+
+void ::to_json(nlohmann::json& j, const PeerInfo& r) {
+	auto inner = nlohmann::json{
+		r.protocol_max
 	};
+
+	if (r.pruning_limit.has_value()) {
+		inner.push_back(fmt::format("p{0:n}", r.pruning_limit.value()));
+	}
+	if (r.tcp_port.has_value()) {
+		inner.push_back(fmt::format("t{0:n}", r.tcp_port.value()));
+	}
+	if (r.ssl_port.has_value()) {
+		inner.push_back(fmt::format("s{0:n}", r.ssl_port.value()));
+	}
+	j = nlohmann::json{
+		r.ip,
+		r.hostname,
+		inner
+	};
+}
+
+void ::to_json(nlohmann::json& j, const TxOut& r) {
+	j = nlohmann::json{
+		{ "tx_pos", r.pos },
+		{"value", r.value},
+		{"tx_hash", r.hash},
+		{"height", r.height}
+	};
+}
+
+void ::to_json(nlohmann::json& j, const BCBlockHeaderResponse& r) {
+	j = nlohmann::json{ };
 }
 
 void ::to_json(nlohmann::json& j, const BCBlockHeadersResponse& r) {
@@ -53,43 +98,52 @@ void ::to_json(nlohmann::json& j, const SHSubscribeResponse& r) {
 }
 
 void ::to_json(nlohmann::json& j, const SHUTXOSResponse& r) {
-	j = nlohmann::json{ };
+	to_json(j, r.utxos);
 }
 
 void ::to_json(nlohmann::json& j, const TXBroadcastResponse& r) {
-	j = nlohmann::json{ };
+	j = r.result;
 }
 
 void ::to_json(nlohmann::json& j, const TXGetResponse& r) {
-	j = nlohmann::json{ };
+	j = nlohmann::json::parse(r.hex_or_rpc_response);
 }
 
 void ::to_json(nlohmann::json& j, const TXGetMerkleResponse& r) {
-	j = nlohmann::json{ };
+	j = nlohmann::json{
+		{"pos", r.pos},
+		{"block_height", r.block_height},
+		r.merkle
+	};
 }
 
 void ::to_json(nlohmann::json& j, const TXIdFromPosResponse& r) {
-	j = nlohmann::json{ };
+	j = nlohmann::json{
+		{"tx_hash", r.tx_hash}
+	};
 }
 
 void ::to_json(nlohmann::json& j, const MPChangesResponse& r) {
-	j = nlohmann::json{ };
+	j = nlohmann::json{ }; //not used anymore?
 }
 
 void ::to_json(nlohmann::json& j, const MPGetFeeHistogramResponse& r) {
 	j = nlohmann::json{ };
+	for (auto x : r.history) {
+		j.push_back(x);
+	}
 }
 
 void ::to_json(nlohmann::json& j, const SVAddPeerResponse& r) {
-	j = nlohmann::json{ };
+	j = r.response;
 }
 
 void ::to_json(nlohmann::json& j, const SVBannerResponse& r) {
-	j = nlohmann::json{ };
+	j = r.banner;
 }
 
 void ::to_json(nlohmann::json& j, const SVDonationAddressResponse& r) {
-	j = nlohmann::json{ };
+	j = r.address;
 }
 
 void ::to_json(nlohmann::json& j, const SVFeaturesResponse& r) {
@@ -105,6 +159,11 @@ void ::to_json(nlohmann::json& j, const SVFeaturesResponse& r) {
 
 void ::to_json(nlohmann::json& j, const SVPeersSubscribeResponse& r) {
 	j = nlohmann::json{ };
+	for (auto p : r.peers) {
+		nlohmann::json nv;
+		to_json(nv, p);
+		j.push_back(nv);
+	}
 }
 
 void ::to_json(nlohmann::json& j, const SVPingResponse& r) {

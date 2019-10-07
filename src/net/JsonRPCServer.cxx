@@ -395,6 +395,11 @@ int JsonRPCServer::HandleCommand(nlohmann::json & cmd) {
 			break;
 		}
 		case ElectrumCommands::BCEstimatefee: {
+			nlohmann::json rsp;
+			BCEstimatefeeResponse v = { 1 };
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::BCHeadersSubscribe: {
@@ -406,21 +411,50 @@ int JsonRPCServer::HandleCommand(nlohmann::json & cmd) {
 			break;
 		}
 		case ElectrumCommands::BCRelayfee: {
+			nlohmann::json rsp;
+			BCRelayfeeResponse v = { 1 };
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SHGetBalance: {
+			nlohmann::json rsp;
+			SHGetBalanceResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SHGetHistory: {
+			nlohmann::json rsp;
+			SHGetHistoryResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SHGetMempool: {
+			nlohmann::json rsp;
+			SHGetMempoolResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SHHistory: {
+			nlohmann::json rsp;
+			SHHistoryResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SHListUnspent: {
+			nlohmann::json rsp;
+			SHListUnspentResponse v = {};
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SHSubscribe: {
@@ -451,42 +485,105 @@ int JsonRPCServer::HandleCommand(nlohmann::json & cmd) {
 			break;
 		}
 		case ElectrumCommands::SHUTXOS: {
+			nlohmann::json rsp;
+			SHUTXOSResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::TXBroadcast: {
+			nlohmann::json rsp;
+			TXBroadcastResponse v = {};
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::TXGet: {
+			nlohmann::json rsp;
+			TXGetResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::TXGetMerkle: {
+			nlohmann::json rsp;
+			TXGetMerkleResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::TXIdFromPos: {
+			nlohmann::json rsp;
+			TXIdFromPosResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::MPChanges: {
+			nlohmann::json rsp;
+			MPChangesResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::MPGetFeeHistogram: {
+			nlohmann::json rsp;
+			MPGetFeeHistogramResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SVAddPeer: {
+			nlohmann::json rsp;
+			SVAddPeerResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SVBanner: {
+			nlohmann::json rsp;
+			SVBannerResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SVDonationAddress: {
+			nlohmann::json rsp;
+
+			CommandSuccess(id, "1BWwXJH3q6PRsizBkSGm2Uw4Sz1urZ5sCj", rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SVFeatures: {
+			nlohmann::json rsp;
+			SVFeaturesResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SVPeersSubscribe: {
+			nlohmann::json rsp;
+			SVPeersSubscribeResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SVPing: {
+			nlohmann::json rsp;
+			SVPingResponse v = {};
+
+			CommandSuccess(id, v, rsp);
+			WriteInternal(std::move(rsp));
 			break;
 		}
 		case ElectrumCommands::SVVersion: {

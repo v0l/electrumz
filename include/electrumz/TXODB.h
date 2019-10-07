@@ -1,6 +1,7 @@
 #pragma once
 
 #include <electrumz/bitcoin/uint256.h>
+#include <electrumz/bitcoin/block.h>
 #include <electrumz/TXO.h>
 
 #include <vector>
@@ -48,6 +49,7 @@ namespace electrumz {
 			int InternalSpendTXO(COutPoint&, COutPoint&);
 			int StartTXOTxn(MDB_txn**, const char*, MDB_dbi&);
 			int IncreaseMapSize();
+			int PushBlockTip(MDB_txn*, const CBlockHeader&);
 		};
 
 		template<typename Stream> inline void Serialize(Stream &s, MDB_val obj)

@@ -4,6 +4,7 @@
 #include <vector>
 #include <optional>
 #include <nlohmann/json.hpp>
+#include <electrumz/bitcoin/uint256.h>
 
 namespace electrumz {
 	namespace commands {
@@ -90,6 +91,13 @@ namespace electrumz {
 			std::optional<int> ssl_port;
 		};
 
+		class ScriptStatus{
+		public: 
+			std::vector<TxInfo> txn;
+
+			uint256 GetStatusHash();
+		}
+
 		class BCBlockHeaderResponse {
 		public:
 			std::vector<std::string> branch;
@@ -166,7 +174,8 @@ namespace electrumz {
 
 		class TXGetResponse {
 		public:
-			std::vector<unsigned char> hex_or_rpc_response; //why
+			//this is just the response from bitcoin core rpc call, forward it
+			std::vector<unsigned char> hex_or_rpc_response;
 		};
 
 		class TXGetMerkleResponse {
@@ -232,6 +241,11 @@ namespace electrumz {
 			std::string protocol_version;
 		};
 
+		template<class T>
+		void to_json(nlohmann::json& j, const std::vector<T>& r);
+		void to_json(nlohmann::json&, const std::string&);
+		void to_json(nlohmann::json&, const PeerInfo&);
+		void to_json(nlohmann::json&, const TxOut&);
 		void to_json(nlohmann::json&, const BCBlockHeaderResponse&);
 		void to_json(nlohmann::json&, const BCBlockHeadersResponse&);
 		void to_json(nlohmann::json&, const BCEstimatefeeResponse&);

@@ -103,7 +103,7 @@ int TXODB::GetTXOs(uint256 scriptHash, std::vector<TXO>& ntx) {
 		spdlog::debug("Got val for {}: {}", HexStr(scriptHash), HexStr((char*)val.mv_data, (char*)val.mv_data + val.mv_size));
 
 		CDataStream ds((char*)val.mv_data, (char*)val.mv_data + val.mv_size, SER_DISK, PROTOCOL_VERSION);
-		Unserialize(ds, outPoint);
+		outPoint.Unserialize(ds);
 
 		mdb_txn_commit(txn);
 		return TXO_OK;
@@ -289,6 +289,10 @@ int TXODB::InternalAddTXO(TXO& nTx, MDB_txn* txn, MDB_dbi& dbi, MDB_dbi& dbi_i2a
 	return TXO_OK;
 }
 
+/// Pushes block tip with
+int TXODB::PushBlockTip(MDB_txn* tx, const CBlockHeader& h) {
+	return TXO_OK;
+}
 
 void TXODB::PreLoadBlocks(std::string path) {
 	spdlog::info("Preload starting.. this will take some time.");
