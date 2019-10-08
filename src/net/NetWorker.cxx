@@ -105,6 +105,15 @@ NetWorker::NetWorker(TXODB *db, Config *cfg) {
 		this->ssl_config = nullptr;
 	}
 #endif
+
+	//Connect to bitcoin rpc server
+	if (!this->cfg->rpchost.empty() && this->cfg->rpc_port != 0 && !this->cfg->rpcusername.empty() && !this->cfg->rpcpassword.empty()) {
+		this->rpcClient = new RPCClient(this->cfg->rpchost, this->cfg->rpc_port, this->cfg->rpcusername, this->cfg->rpcpassword);
+		this->rpcClient->Connect(&this->loop);
+	}
+	else {
+		spdlog::warn("No rpc server details where set in the config, some features may not work..");
+	}
 }
 
 NetWorker::~NetWorker() {
@@ -145,21 +154,14 @@ void NetWorker::OnConnect(uv_stream_t* server, int status) {
 	uv_tcp_t *client = (uv_tcp_t*)malloc(sizeof(uv_tcp_t));
 	uv_tcp_init(server->loop, client);
 	if (uv_accept(server, (uv_stream_t*)client) == 0) {
-		spdlog::info("New connection!");
 #ifndef ELECTRUMZ_NO_SSL
-		new JsonRPCServer(this->db, client, this->cfg, this->ssl_config);
+		new JsonRPCServer(this->db, client, this->rpcClient, this->cfg, this->ssl_config);
 #else
-		new JsonRPCServer(this->db, client);
+		new JsonRPCServer(this->db, client, this->rpcClient);
 #endif
 	}
 }
 
 void NetWorker::Join() {
 	this->worker_thread.join();
-}
-
-RPCClient NetWorker::CreateRPCClient(std::string addr, std::string uname, std::string pw) {
-	RPCClient ret(addr, uname, pw);
-	ret.Connect(&this->loop);
-	return ret;
 }

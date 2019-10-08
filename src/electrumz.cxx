@@ -31,7 +31,7 @@ int main(int argc, char* argv[]) {
 	}
 
 #ifdef _DEBUG
-	spdlog::set_level(spdlog::level::level_enum::debug);
+	spdlog::set_level(spdlog::level::level_enum::trace);
 #endif
 	spdlog::info("Starting electrumz..");
 	auto cfg = new util::Config("config.json");

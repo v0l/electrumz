@@ -13,6 +13,7 @@ namespace electrumz {
 
 			//rpc details
 			std::string rpchost;
+			unsigned short rpc_port;
 			std::string rpcusername;
 			std::string rpcpassword;
 

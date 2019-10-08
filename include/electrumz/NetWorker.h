@@ -23,14 +23,13 @@ namespace electrumz {
 			~NetWorker();
 			void Init();
 			void Join();
-
-			RPCClient CreateRPCClient(std::string, std::string, std::string);
 		private:
 			void Work();
 			void OnConnect(uv_stream_t *s, int status);
 
 			const Config* cfg;
 			TXODB *db;
+			RPCClient* rpcClient;
 
 			bool ssl_enabled;
 			std::thread worker_thread;

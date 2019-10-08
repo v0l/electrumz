@@ -3,8 +3,10 @@
 #include <map>
 #include <vector>
 #include <optional>
+#include <sstream>
 #include <nlohmann/json.hpp>
 #include <electrumz/bitcoin/uint256.h>
+#include <electrumz/bitcoin/hash.h>
 
 namespace electrumz {
 	namespace commands {
@@ -91,12 +93,21 @@ namespace electrumz {
 			std::optional<int> ssl_port;
 		};
 
-		class ScriptStatus{
-		public: 
+		class ScriptStatus {
+		public:
 			std::vector<TxInfo> txn;
 
-			uint256 GetStatusHash();
-		}
+			
+			uint256 GetStatusHash() const {
+				std::stringstream ss;
+				for (auto tx : txn) {
+					ss << tx.hash << ":" << tx.height;
+				}
+
+				auto str = ss.str();
+				return Hash(str.begin(), str.end());
+			}
+		};
 
 		class BCBlockHeaderResponse {
 		public:
@@ -136,7 +147,7 @@ namespace electrumz {
 
 		class SHGetHistoryResponse {
 		public:
-			std::vector<TxInfo> result;
+			std::vector<TxInfo> history;
 		};
 
 		class SHGetMempoolResponse {
@@ -152,13 +163,13 @@ namespace electrumz {
 
 		class SHListUnspentResponse {
 		public:
-			std::vector<TxOut> result;
+			std::vector<TxOut> utxos;
 		};
 
 		class SHSubscribeResponse {
 		public:
 			std::string last_tx;
-			TxInfo info;
+			ScriptStatus status;
 		};
 
 		class SHUTXOSResponse {
@@ -246,6 +257,7 @@ namespace electrumz {
 		void to_json(nlohmann::json&, const std::string&);
 		void to_json(nlohmann::json&, const PeerInfo&);
 		void to_json(nlohmann::json&, const TxOut&);
+		void to_json(nlohmann::json&, const ScriptStatus&);
 		void to_json(nlohmann::json&, const BCBlockHeaderResponse&);
 		void to_json(nlohmann::json&, const BCBlockHeadersResponse&);
 		void to_json(nlohmann::json&, const BCEstimatefeeResponse&);

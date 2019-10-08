@@ -1,5 +1,6 @@
 #include <electrumz/JsonRPCServer.h>
 #include <electrumz/bitcoin/util_strencodings.h>
+#include <electrumz/RPCClient.h>
 
 #if defined(_DEBUG) && !defined(ELECTRUMZ_NO_SSL)
 #include <mbedtls/debug.h>
@@ -28,24 +29,39 @@ using namespace electrumz::commands;
 #endif
 
 #ifndef ELECTRUMZ_NO_SSL
-JsonRPCServer::JsonRPCServer(TXODB* db, uv_tcp_t* s, const Config* cfg, mbedtls_ssl_config* ssl_cfg)
-	: db(db), stream(s), config(cfg), ssl_config(ssl_cfg), ssl(nullptr) {
+JsonRPCServer::JsonRPCServer(TXODB* db, uv_tcp_t* s, RPCClient* rpc, const Config* cfg, mbedtls_ssl_config* ssl_cfg)
+	: db(db), stream(s), config(cfg), ssl_config(ssl_cfg), ssl(nullptr), rpc(rpc) {
 #else
-JsonRPCServer::JsonRPCServer(TXODB * db, uv_tcp_t * s, const Config * cfg) : db(db), stream(s), config(cfg) {
+JsonRPCServer::JsonRPCServer(TXODB * db, uv_tcp_t * s, const RPCClient * rpc, const Config * cfg) : db(db), stream(s), config(cfg), rpc(rpc) {
 #endif
 	this->state = JsonRPCState::START;
 
-	//create rpc client
-	//later this will need to be shared or pooled
-	// 1:1 rpc connections is not good..
-	auto loop = uv_handle_get_loop((uv_handle_t*)s);
-	auto nrpc = new RPCClient(cfg->rpchost, cfg->rpcusername, cfg->rpcpassword);
-	nrpc->Connect(loop);
-
-	this->rpc = nrpc;
-
 	//ref this class to track req/reply
 	uv_handle_set_data((uv_handle_t*)s, this);
+
+	//print connection info
+	int nerr = 0;
+	int nlen = 0;
+	struct sockaddr_storage name;
+	if (!(nerr = uv_tcp_getpeername(s, (struct sockaddr*)&name, &nlen))) {
+		int port = 0;
+		char addr[INET6_ADDRSTRLEN];
+		if (name.ss_family == AF_INET) {
+			auto i4 = (struct sockaddr_in*)&name;
+			port = i4->sin_port;
+			uv_ip4_name(i4, addr, sizeof(addr));
+		}
+		else if (name.ss_family == AF_INET6) {
+			auto i6 = (struct sockaddr_in6*)&name;
+			port = i6->sin6_port;
+			uv_ip6_name(i6, addr, sizeof(addr));
+		}
+		spdlog::info("[JRPC-SRV] New connection from {}:{}", addr, port);
+	}
+	else {
+		spdlog::debug("[JRPC-SRV] Failed to get peer name: {}", uv_strerror(nerr));
+		spdlog::info("[JRPC-SRV] New connection from ??");
+	}
 
 	uv_read_start((uv_stream_t*)s, [](uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
 		buf->base = (char*)malloc(JSONRPC_BUFF_LEN);
@@ -56,6 +72,10 @@ JsonRPCServer::JsonRPCServer(TXODB * db, uv_tcp_t * s, const Config * cfg) : db(
 				rpc->End();
 			}
 		});
+}
+
+JsonRPCServer::~JsonRPCServer() {
+	this->End();
 }
 
 #ifndef ELECTRUMZ_NO_SSL
@@ -103,7 +123,7 @@ int JsonRPCServer::AppendBuffer(ssize_t nread, unsigned char* buf) {
 
 	memcpy(this->buf + this->offset, buf, nread);
 	this->offset += nread;
-	spdlog::debug("Internal offset is {}", this->offset);
+	spdlog::trace("[IBUF] Internal buffer offset is {}", this->offset);
 	return 1;
 }
 
@@ -120,7 +140,7 @@ int JsonRPCServer::Write(ssize_t len, unsigned char* buf) {
 	return 0;
 }
 
-int JsonRPCServer::WriteInternal(ssize_t len, unsigned char* buf) {
+int JsonRPCServer::WriteInternal(ssize_t len, const unsigned char* buf) {
 	uv_buf_t* sbuf = new uv_buf_t[2];
 	sbuf[0].base = (char*)malloc(len);
 	sbuf[0].len = len;
@@ -144,7 +164,7 @@ int JsonRPCServer::WriteInternal(ssize_t len, unsigned char* buf) {
 }
 
 int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t * buf) {
-	spdlog::info("Got {} bytes from socket.", nread);
+	spdlog::trace("Got {} bytes from socket.", nread);
 	if (nread <= 0) {
 		spdlog::error("Connection error: {}", uv_strerror(nread));
 		return 0; //socket closed
@@ -232,7 +252,7 @@ int JsonRPCServer::HandleRead(ssize_t nread, const uv_buf_t * buf) {
 		memcpy(buf_check + this->offset, tmpBuf, buf_len);
 		buf_len += this->offset; //Adjust to new buf_check len including offset
 		this->offset = 0; //clear our internal buffer offset
-		spdlog::debug("Internal offset is {}", this->offset);
+		spdlog::trace("[IBUF] Internal offset is {}", this->offset);
 		if (shouldFree) {
 			free(tmpBuf);
 		}
@@ -259,8 +279,7 @@ parse_again:
 		auto mlen = nl - ((char*)buf_check + readOffset);
 		try {
 			nlohmann::json req = nlohmann::json::parse(nlohmann::detail::input_adapter(buf_check + readOffset, mlen));
-			spdlog::info("Got command: {}", req.dump());
-			this->HandleCommand(req);
+			this->HandleCommand(std::move(req));
 		}
 		catch (nlohmann::detail::exception ex) {
 			spdlog::error("Parser exception: {}", ex.what());
@@ -278,6 +297,7 @@ parse_again:
 #ifndef ELECTRUMZ_NO_SSL
 		if (shouldFree) {
 			free(buf_check);
+			spdlog::trace("Free buf_check");
 		}
 #endif
 		return ret;
@@ -286,6 +306,7 @@ parse_again:
 #ifndef ELECTRUMZ_NO_SSL
 	if (shouldFree) {
 		free(buf_check);
+		spdlog::trace("Free buf_check");
 	}
 #endif
 	return 1;
@@ -318,21 +339,25 @@ int JsonRPCServer::CommandError(int id, std::string msg, int err, nlohmann::json
 	return 1;
 }
 
-int JsonRPCServer::WriteInternal(nlohmann::json && data) {
+int JsonRPCServer::WriteInternal(const nlohmann::json& data) {
 	auto d = data.dump(-1, ' ', true);
-	spdlog::info("Writing response: {}", d);
+	spdlog::debug("Writing response: {}", d);
 	d.resize(d.size() + 1, '\n');
 
 	return WriteInternal(d.size(), (unsigned char*)d.data());
 }
 
-int JsonRPCServer::HandleCommand(nlohmann::json & cmd) {
+int JsonRPCServer::HandleCommand(nlohmann::json&& cmd) {
 	if (cmd.is_null()) {
 		nlohmann::json jrsp;
 		CommandError(0, "Parser error", -32700, jrsp);
 		WriteInternal(std::move(jrsp));
 		return 0;
 	}
+	else {
+		spdlog::debug("Got command: {}", cmd.dump());
+	}
+
 	auto method = cmd["method"].get<std::string>();
 	auto id = cmd["id"].get<int>();
 	if (CommandMap.find(method) != CommandMap.end()) {
@@ -353,7 +378,10 @@ int JsonRPCServer::HandleCommand(nlohmann::json & cmd) {
 				}
 
 				BCBlockHeaderResponse rsp;
-				//do some stuff
+				
+				auto h = cmd["params"][0].get<int>();
+
+				this->rpc->Query("getblockhash", h, "test");
 
 				CommandSuccess(id, rsp, jrsp);
 				WriteInternal(std::move(jrsp));
@@ -397,7 +425,7 @@ int JsonRPCServer::HandleCommand(nlohmann::json & cmd) {
 		case ElectrumCommands::BCEstimatefee: {
 			nlohmann::json rsp;
 			BCEstimatefeeResponse v = { 1 };
-
+			
 			CommandSuccess(id, v, rsp);
 			WriteInternal(std::move(rsp));
 			break;
@@ -407,7 +435,7 @@ int JsonRPCServer::HandleCommand(nlohmann::json & cmd) {
 			BCHeadersSubscribeResponse rsp = { 10, ParseHex("01000030c306405f586ae1ae2330cb3f8a1ecf5e8f50192682656ddb5fa000fb486af66f4d304c05be48e86ad3f56d8f639d5c124f3cedb3a08d539ef5aabbdba9582708f32e975dffff7f2006000000") };
 
 			CommandSuccess(id, rsp, jrsp);
-			WriteInternal(std::move(jrsp));
+			WriteInternal(jrsp);
 			break;
 		}
 		case ElectrumCommands::BCRelayfee: {
@@ -558,7 +586,7 @@ int JsonRPCServer::HandleCommand(nlohmann::json & cmd) {
 		case ElectrumCommands::SVDonationAddress: {
 			nlohmann::json rsp;
 
-			CommandSuccess(id, "1BWwXJH3q6PRsizBkSGm2Uw4Sz1urZ5sCj", rsp);
+			CommandSuccess(id, "2MzwLdkKRKqHtmpbXoYpXjm7SKT8LeGXriM", rsp);
 			WriteInternal(std::move(rsp));
 			break;
 		}
@@ -611,7 +639,7 @@ int JsonRPCServer::HandleCommand(nlohmann::json & cmd) {
 }
 
 void JsonRPCServer::End() {
-	spdlog::info("end");
+	spdlog::trace("[JsonRPCServer] closing..");
 	uv_read_stop((uv_stream_t*)this->stream);
 
 #ifndef ELECTRUMZ_NO_SSL
@@ -627,7 +655,7 @@ void JsonRPCServer::End() {
 	uv_close((uv_handle_t*)this->stream, [](uv_handle_t* h) {
 		auto svr = (JsonRPCServer*)uv_handle_get_data(h);
 
-		spdlog::info("Connection closed..");
+		spdlog::trace("[JsonRPCServer] closed.");
 		free(svr);
 		free(h);
 		});

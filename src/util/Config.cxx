@@ -50,6 +50,9 @@ void Config::from_json(std::ifstream &fi) {
 	if (j["rpc_host"].is_string()) {
 		this->rpchost = j["rpc_host"].get<std::string>();
 	}
+	if (j["rpc_port"].is_number()) {
+		this->rpc_port = j["rpc_port"].get<unsigned short>();
+	}
 	if (j["rpc_username"].is_string()) {
 		this->rpcusername = j["rpc_username"].get<std::string>();
 	}

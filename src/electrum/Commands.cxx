@@ -50,6 +50,11 @@ void ::to_json(nlohmann::json& j, const TxOut& r) {
 	};
 }
 
+void ::to_json(nlohmann::json& j, const ScriptStatus& r) {
+	auto h = r.GetStatusHash();
+	j = HexStr(h.begin(), h.end());
+}
+
 void ::to_json(nlohmann::json& j, const BCBlockHeaderResponse& r) {
 	j = nlohmann::json{ };
 }
@@ -59,7 +64,7 @@ void ::to_json(nlohmann::json& j, const BCBlockHeadersResponse& r) {
 }
 
 void ::to_json(nlohmann::json& j, const BCEstimatefeeResponse& r) {
-	j = nlohmann::json{ };
+	j = r.value;
 }
 
 void ::to_json(nlohmann::json& j, const BCHeadersSubscribeResponse& r) {
@@ -70,35 +75,52 @@ void ::to_json(nlohmann::json& j, const BCHeadersSubscribeResponse& r) {
 }
 
 void ::to_json(nlohmann::json& j, const BCRelayfeeResponse& r) {
-	j = nlohmann::json{ };
+	j = r.value;
 }
 
 void ::to_json(nlohmann::json& j, const SHGetBalanceResponse& r) {
-	j = nlohmann::json{ };
+	j = nlohmann::json{
+		{ "confirmed", r.confirmed },
+		{ "unconfiemd", r.unconfirmed }
+	};
 }
 
 void ::to_json(nlohmann::json& j, const SHGetHistoryResponse& r) {
 	j = nlohmann::json{ };
+	for (auto h : r.history) {
+		j.push_back(nlohmann::json{
+			{ "height", h.height },
+			{ "tx_hash", h.hash }
+		});
+	}
 }
 
 void ::to_json(nlohmann::json& j, const SHGetMempoolResponse& r) {
 	j = nlohmann::json{ };
+	for (auto h : r.result) {
+		j.push_back(nlohmann::json{
+			{ "height", h.height },
+			{ "tx_hash", h.hash },
+			{ "fee", h.fee }
+		});
+	}
 }
 
 void ::to_json(nlohmann::json& j, const SHHistoryResponse& r) {
-	j = nlohmann::json{ };
+	// 2.0 feature
 }
 
 void ::to_json(nlohmann::json& j, const SHListUnspentResponse& r) {
-	j = nlohmann::json{ };
+	to_json(j, r.utxos);
 }
 
 void ::to_json(nlohmann::json& j, const SHSubscribeResponse& r) {
-	j = nlohmann::json{ };
+	to_json(j, r.status);
+	// 2.0 feature (return last tx hash)
 }
 
 void ::to_json(nlohmann::json& j, const SHUTXOSResponse& r) {
-	to_json(j, r.utxos);
+	// 2.0 feature
 }
 
 void ::to_json(nlohmann::json& j, const TXBroadcastResponse& r) {
@@ -107,6 +129,7 @@ void ::to_json(nlohmann::json& j, const TXBroadcastResponse& r) {
 
 void ::to_json(nlohmann::json& j, const TXGetResponse& r) {
 	j = nlohmann::json::parse(r.hex_or_rpc_response);
+	// 2.0 feature (merkle)
 }
 
 void ::to_json(nlohmann::json& j, const TXGetMerkleResponse& r) {
@@ -124,7 +147,8 @@ void ::to_json(nlohmann::json& j, const TXIdFromPosResponse& r) {
 }
 
 void ::to_json(nlohmann::json& j, const MPChangesResponse& r) {
-	j = nlohmann::json{ }; //not used anymore?
+	j = nlohmann::json{ };
+	// 2.0 feature
 }
 
 void ::to_json(nlohmann::json& j, const MPGetFeeHistogramResponse& r) {

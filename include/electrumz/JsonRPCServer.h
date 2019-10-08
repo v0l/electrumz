@@ -32,10 +32,11 @@ namespace electrumz {
 		class JsonRPCServer {
 		public:
 #ifndef ELECTRUMZ_NO_SSL
-			JsonRPCServer(TXODB *db, uv_tcp_t*, const Config*, mbedtls_ssl_config*);
+			JsonRPCServer(TXODB *db, uv_tcp_t*, RPCClient* rpc, const Config*, mbedtls_ssl_config*);
 #else
-			JsonRPCServer(TXODB* db, uv_tcp_t*, const Config*);
+			JsonRPCServer(TXODB* db, uv_tcp_t*, RPCClient* rpc, const Config*);
 #endif
+			~JsonRPCServer();
 
 			int Write(ssize_t, unsigned char*);
 			void End();
@@ -43,10 +44,10 @@ namespace electrumz {
 			int HandleRead(ssize_t, const uv_buf_t*);
 			int HandleWrite(uv_write_t*, int);
 			int AppendBuffer(ssize_t, unsigned char*);
-			int WriteInternal(ssize_t, unsigned char*);
-			int WriteInternal(nlohmann::json&&);
+			int WriteInternal(const ssize_t, const unsigned char*);
+			int WriteInternal(const nlohmann::json&);
 			bool IsTLSClientHello(ssize_t, char*);
-			int HandleCommand(nlohmann::json&);
+			int HandleCommand(nlohmann::json&&);
 
 			template<class T>
 			int CommandSuccess(int id, const T&, nlohmann::json&);
@@ -68,7 +69,7 @@ namespace electrumz {
 			uv_tcp_t *stream;
 			int state;
 			const Config* config;
-			const RPCClient* rpc;
+			RPCClient* rpc;
 			TXODB* db;
 
 			unsigned char *buf = nullptr;
